@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  release:
+    name: Release ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-gnu
+            os: windows-latest
+    env:
+      CARGO_PROFILE_RELEASE_LTO: true
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Install cross-compilation targets
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          rustup target add ${{ matrix.target }}
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          TARGET="${{ matrix.target }}"
+          ARTIFACT="bdmp-ingest-${TARGET}${EXT}"
+          cp "target/${TARGET}/release/bdmp-ingest${EXT}" "${ARTIFACT}"
+          echo "${ARTIFACT}" >> artifacts.txt
+          sha256sum "${ARTIFACT}" > "${ARTIFACT}.sha256"
+      - name: Generate SHA256SUMS
+        run: |
+          cat artifacts.txt | xargs -I{} sh -c 'cat {}.sha256'
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bdmp-ingest-${{ matrix.target }}*
+            SHA256SUMS
+          generate_release_notes: true

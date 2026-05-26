@@ -1,30 +1,37 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use anyhow::Context;
 use crate::download::manifest::{BDPMFile, Encoding};
 
 pub struct TabParser {
-    reader: BufReader<File>,
+    reader: BufReader<Cursor<Vec<u8>>>,
     line_number: usize,
     buffer: Vec<String>,
     in_multiline: bool,
-    pub(crate) encoding: Encoding,
 }
 
 impl TabParser {
     /// Open a BDPM file, decode with the correct encoding, return a streaming parser.
     pub fn from_path(path: &Path, file: BDPMFile) -> anyhow::Result<Self> {
-        let f = File::open(path)
-            .with_context(|| format!("Failed to open {}", path.display()))?;
-        let reader = BufReader::with_capacity(1 << 16, f);
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+
+        let encoding = match file.schema().encoding {
+            Encoding::Windows1252 => encoding_rs::WINDOWS_1252,
+            Encoding::Latin1 => encoding_rs::WINDOWS_1252, // ISO-8859-1 not in encoding_rs; practical difference only affects C1 controls which don't appear in BDPM
+            Encoding::Utf8 => encoding_rs::UTF_8,
+        };
+
+        let (decoded, _, _) = encoding.decode(&bytes);
+        let content = decoded.into_owned().into_bytes();
+
+        let reader = BufReader::with_capacity(1 << 16, Cursor::new(content));
         Ok(Self {
             reader,
             line_number: 0,
             buffer: Vec::new(),
             in_multiline: false,
-            encoding: file.schema().encoding,
         })
     }
 }
@@ -61,7 +68,7 @@ impl Iterator for TabParser {
                     self.buffer.clear();
                     self.in_multiline = false;
                     line.clear();
-                    return Some(Ok(decode_line(&result.join("\t"), self.encoding)));
+                    return Some(Ok(decode_line(&result.join("\t"))));
                 }
                 self.buffer.push(trimmed.to_string());
                 self.in_multiline = true;
@@ -77,7 +84,7 @@ impl Iterator for TabParser {
                 continue;
             } else {
                 // Single-line record
-                return Some(Ok(decode_line(trimmed, self.encoding)));
+                return Some(Ok(decode_line(trimmed)));
             }
         }
     }
@@ -90,35 +97,7 @@ fn is_cis_code(line: &str) -> bool {
         && line.chars().take(8).all(|c| c.is_ascii_digit())
 }
 
-/// Decode bytes using the correct encoding, then split on tab.
-fn decode_line(line: &str, _encoding: Encoding) -> Vec<String> {
-    // The line is already &str from read_line (String dereferenced).
-    // For files decoded from Windows-1252/Latin-1, the bytes were already decoded
-    // by BufReader reading as bytes and converting. Since we're using File+BufReader
-    // (not raw bytes), the platform default encoding applies. We need to handle this
-    // at the raw byte level for BDPM files.
-    //
-    // For this initial implementation, we'll handle encoding at the file-open level.
-    // A proper implementation uses raw byte reading with encoding_rs decoders.
-    //
-    // For now: split on tab directly (assumes files are opened with correct encoding).
-    // This will be fixed in 01-02 implementation with proper byte-level decoding.
+/// Split a line on tab characters.
+fn decode_line(line: &str) -> Vec<String> {
     line.split('\t').map(|s| s.to_string()).collect()
 }
-
-// use std::io::Read;
-//
-// For proper encoding support, replace from_path with:
-//
-// pub fn from_path(path: &Path, file: BDPMFile) -> anyhow::Result<Self> {
-//     let encoding = match file.schema().encoding {
-//         Encoding::Windows1252 => encoding_rs::WINDOWS_1252,
-//         Encoding::Latin1 => encoding_rs::ISO_8859_1,
-//         Encoding::Utf8 => encoding_rs::UTF_8,
-//     };
-//     let mut bytes = Vec::new();
-//     File::open(path)?.read_to_end(&mut bytes)?;
-//     let (decoded, _, _) = encoding.decode(&bytes);
-//     let content = decoded.into_owned();
-//     // Then parse lines from the decoded string...
-// }

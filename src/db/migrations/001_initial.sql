@@ -2,10 +2,7 @@
 -- Migration 001: Initial schema
 -- All 10 BDPM tables + import tracking
 -- Target: SQLite 3.x (WAL mode)
-
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;
+-- Note: PRAGMAs set in init_db(), not here (SQLite disallows PRAGMA inside transaction)
 
 -- =============================================================================
 -- CORE TABLE: drugs
