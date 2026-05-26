@@ -10,7 +10,7 @@ mod normalize;
 mod parse;
 
 use crate::db::init_db;
-use crate::download::{state::StateStore, Fetcher};
+use crate::download::{state::StateStore, Fetcher, fetch_listing_dates, diff_listing_dates, ListingDates};
 use crate::import::run_import;
 use crate::download::manifest::BDPMFile;
 
@@ -52,6 +52,13 @@ enum Command {
         data_dir: PathBuf,
         #[arg(long, default_value = "10")]
         limit: usize,
+    },
+    /// Poll BDPM HTML listing page for file date changes (no download).
+    /// Reimplements medicaments-api.giygas.dev polling logic independently.
+    /// Fetches ~5-10 Ko HTML page, parses embedded per-file update dates, reports changes.
+    Poll {
+        #[arg(long, default_value = "data")]
+        data_dir: PathBuf,
     },
 }
 
@@ -134,7 +141,7 @@ fn main() -> Result<()> {
         Command::Logs { data_dir, limit } => {
             let db_path = data_dir.join("bdpm.db");
             if !db_path.exists() {
-                anyhow::bail!("Database not found at {}", db_path.display());
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
             }
             let conn = rusqlite::Connection::open(&db_path)?;
 
@@ -160,6 +167,46 @@ fn main() -> Result<()> {
                 let ms = row.4.map(|m| m.to_string()).unwrap_or_default();
                 println!("{:<25} {:>8} {:>10} {:>6} {:>8}  {}", row.0, row.1, row.2, row.3, ms, row.5);
             }
+        }
+
+        Command::Poll { data_dir } => {
+            std::fs::create_dir_all(&data_dir)?;
+            let fetcher = Fetcher::new();
+
+            // Load stored listing dates
+            let stored = ListingDates::load(&data_dir)?;
+
+            // Fetch fresh listing page and parse dates
+            let fresh = fetch_listing_dates(&fetcher)?;
+
+            // Show all parsed dates
+            println!("{:<30} {:<15} {:<15}", "file", "listing date", "stored date");
+            println!("{}", "-".repeat(60));
+            for file in BDPMFile::all() {
+                let fname = file.filename();
+                let fd = fresh.get(fname).map(|s| s.as_str()).unwrap_or("—");
+                let sd = stored.dates.get(fname).map(|s| s.as_str()).unwrap_or("—");
+                let flag = if fresh.get(fname) != stored.dates.get(fname) {
+                    " ← CHANGED"
+                } else {
+                    ""
+                };
+                println!("{:<30} {:<15} {:<15}{}", fname, fd, sd, flag);
+            }
+
+            // Diff and report
+            let changed = diff_listing_dates(&fresh, &stored.dates);
+            if changed.is_empty() {
+                println!("\nNo changes detected.");
+            } else {
+                println!("\nChanged files: {}",
+                    changed.iter().map(|f| f.filename()).collect::<Vec<_>>().join(", "));
+            }
+
+            // Save fresh dates to disk
+            let fresh_state = ListingDates { dates: fresh };
+            fresh_state.save(&data_dir)?;
+            println!("Listing dates updated.");
         }
     }
 

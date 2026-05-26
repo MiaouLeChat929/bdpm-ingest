@@ -22,7 +22,7 @@ Analysis of all 10 files completed. Findings baked into BRIEF.md:
 - Exact duplicate rows in CIS_COMPO discovered
 - Seeds all Phase 1 integration tests
 
-## Phase 1: Foundation
+## Phase 1: Foundation ✅ DONE (2026-05-26)
 
 | Plan | Goal | Key Deliverable |
 |------|------|-----------------|
@@ -31,15 +31,16 @@ Analysis of all 10 files completed. Findings baked into BRIEF.md:
 | 01-03 | Data profiling integration + FileSchema validation | Field-count regression tests fire correctly |
 | 01-04 | Normalization pipeline — price (cents), whitespace strip, CIP strip | `normalize_price("1,466,29") == 146629` |
 | 01-05 | Database init + migration + import orchestrator | All 10 files imported, orphan FK relaxed, CHECK constraints enforced |
-
-**Note on Phase 1 integration tests:** The test suite (row counts, field counts, referential integrity) is authored in 01-03. Phase 4's CI regression suite wires these tests into GitHub Actions — the tests themselves exist from day one of Phase 1.
 | 01-06 | ID/code normalization — CIS TEXT, ATCD codes, generic type enum | `normalize_generic_type("4") == "sustained-release"` |
 | 01-07 | Database init + staging + migration | `bdpm-ingest import` creates all tables, imports data |
 
-**Critical ordering within Phase 1:**
-- 01-01 → 01-02 → 01-03 (parser → validation)
-- 01-03 → 01-04/01-05/01-06 (can run in parallel once validation is stable)
-- 01-04+01-05+01-06 → 01-07 (all normalizers → DB init)
+**Post-Phase 1 findings (from research 2026-05-26):**
+- BDPM sync: monthly cadence (~28th), twice-daily poll (06h/18h) sufficient for intra-month obligation
+- No delta possible — full-table reload always, confirmed by reference implementation (medicaments-api.giygas.dev)
+- Zero-byte anomaly on CIS_CIP_bdpm + Ruptures_stocks — null checks needed
+- Encoding Phase 1.5: `std::fs::read()` + encoding_rs, keep sync, ~20 lines
+- CI: rust-cache@v2, MSRV 1.80, clippy -D warnings, cargo-audit for security
+- GitHub release: .db as release asset, NOT git-committed; cross-platform builds via cross
 
 ## Phase 2: API
 
@@ -84,7 +85,7 @@ Analysis of all 10 files completed. Findings baked into BRIEF.md:
 | Phase | Status |
 |-------|--------|
 | 00-data-profiling | ✅ DONE |
-| 01-foundation | ⏳ pending |
+| 01-foundation | ✅ DONE (2026-05-26) |
 | 02-api | ⏳ pending |
 | 03-sync | ⏳ pending |
 | 03.5-safety | ⏳ pending (deferred) |

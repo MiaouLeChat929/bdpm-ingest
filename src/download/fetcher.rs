@@ -99,6 +99,61 @@ impl Fetcher {
 
         Ok((bytes, content_len))
     }
+
+    /// Fetch a URL and return the response body as a UTF-8 string.
+    ///
+    /// Used for HTML listing pages (no file save, just text extraction).
+    /// Same retry/backoff strategy as `fetch`.
+    pub fn fetch_text(&self, url: &str) -> anyhow::Result<String> {
+        let backoffs = [5, 10, 30];
+
+        for attempt in 1..=3 {
+            match self.fetch_raw(url) {
+                Ok(bytes) => {
+                    // The listing page is served as HTML — decode assuming UTF-8
+                    // (French accents are in UTF-8 on the listing page).
+                    match String::from_utf8(bytes) {
+                        Ok(text) => return Ok(text),
+                        Err(e) => {
+                            // Fall back to Latin-1 if UTF-8 fails (some servers mislabel).
+                            let bytes = e.into_bytes();
+                            let latin1_lossy = String::from_utf8_lossy(&bytes);
+                            tracing::debug!("Listing page decoded as Latin-1 (UTF-8 failed)");
+                            return Ok(latin1_lossy.into_owned());
+                        }
+                    }
+                }
+                Err(e) => {
+                    if attempt < 3 {
+                        let backoff = backoffs[attempt - 1];
+                        tracing::warn!(
+                            "fetch_text attempt {}/3 failed for {}: {}. Retrying in {}s.",
+                            attempt, url, e, backoff
+                        );
+                        std::thread::sleep(Duration::from_secs(backoff));
+                    } else {
+                        anyhow::bail!("fetch_text failed for {} after 3 attempts: {}", url, e);
+                    }
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// Raw fetch returning bytes (used internally).
+    fn fetch_raw(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        let agent = ureq::Agent::new();
+        let response = agent
+            .get(url)
+            .set("User-Agent", &self.user_agent)
+            .set("Accept-Encoding", "identity")
+            .timeout(Duration::from_secs(30))
+            .call()?;
+        let mut reader = response.into_reader();
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 impl Default for Fetcher {
