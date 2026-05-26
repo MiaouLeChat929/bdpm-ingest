@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
 
 mod api;
+mod cache;
 mod db;
 mod download;
 mod import;

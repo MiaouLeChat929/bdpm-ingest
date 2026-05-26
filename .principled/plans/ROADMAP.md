@@ -86,7 +86,7 @@ Analysis of all 10 files completed. Findings baked into BRIEF.md:
 |-------|--------|
 | 00-data-profiling | ✅ DONE |
 | 01-foundation | ✅ DONE (2026-05-26) |
-| 02-api | ⏳ pending |
-| 03-sync | ⏳ pending |
-| 03.5-safety | ⏳ pending (deferred) |
-| 04-cicd | ⏳ pending |
+| 02-api | ✅ DONE (2026-05-26) |
+| 03-sync | ✅ DONE (2026-05-26) |
+| 03.5-safety | ✅ STUB (2026-05-26) — endpoint + TTL cache, scraping deferred |
+| 04-cicd | ✅ DONE (2026-05-26) |

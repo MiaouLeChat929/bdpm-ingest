@@ -1,6 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::Json, Router, routing::get};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::task::spawn_blocking;
 
 pub mod drugs;
@@ -9,13 +10,18 @@ pub mod search;
 pub mod atc;
 pub mod availability;
 pub mod openapi;
+pub mod safety;
 
 pub use drugs::drug_detail;
 pub use search::search_drugs;
+pub use safety::{SafetyCache, SafetyData};
+
+use crate::cache::TtlCache;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db_path: PathBuf,
+    pub safety_cache: Arc<TtlCache<String, SafetyData>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -27,13 +33,16 @@ pub struct HealthResponse {
 
 /// Start the axum HTTP server on the given address.
 pub async fn run_server(addr: &str, db_path: PathBuf) {
-    let state = AppState { db_path };
+    // 6-hour TTL cache for safety data (per BRIEF.md Phase 3.5)
+    let safety_cache = Arc::new(TtlCache::new(std::time::Duration::from_secs(6 * 3600)));
+    let state = AppState { db_path, safety_cache };
     let app = Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(openapi::openapi_json))
         .route("/openapi.yaml", get(openapi::openapi_yaml))
         .route("/drugs", get(search::search_drugs))
         .route("/drugs/{cis}", get(drugs::drug_detail))
+        .route("/drugs/{cis}/safety", get(safety::drug_safety))
         .route("/generic-groups", get(groups::list_generic_groups))
         .route("/generic-groups/{group_id}", get(groups::generic_group_detail))
         .route("/atc", get(atc::atc_top_level))
