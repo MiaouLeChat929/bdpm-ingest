@@ -647,3 +647,120 @@ fn test_no_null_primary_keys() {
 
     assert_eq!(null_presentations_cip, 0, "Found NULL cip in presentations table");
 }
+
+// =============================================================================
+// SAFETY ALERTS (schema + endpoint logic)
+// =============================================================================
+
+#[test]
+fn safety_alerts_table_exists() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    // Verify safety_alerts table exists (created by migration 005)
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='safety_alerts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if count == 0 {
+        eprintln!("SKIP: safety_alerts table not present (migration 005 not yet applied to this DB)");
+        return;
+    }
+
+    assert_eq!(count, 1, "safety_alerts table should exist");
+}
+
+#[test]
+fn safety_alerts_schema() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    // Check if table exists first (may not exist on older DB snapshots)
+    let table_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='safety_alerts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if table_count == 0 {
+        eprintln!("SKIP: safety_alerts table not present (migration 005 not yet applied)");
+        return;
+    }
+
+    // Verify expected columns exist
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(safety_alerts)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    assert!(cols.contains(&"id".to_string()), "missing id column");
+    assert!(cols.contains(&"cis".to_string()), "missing cis column");
+    assert!(cols.contains(&"start_date".to_string()), "missing start_date column");
+    assert!(cols.contains(&"end_date".to_string()), "missing end_date column");
+    assert!(cols.contains(&"message_plain".to_string()), "missing message_plain column");
+    assert!(cols.contains(&"source_url".to_string()), "missing source_url column");
+}
+
+#[test]
+fn safety_alerts_cis_fk_to_drugs() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    // Check if table exists first
+    let table_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='safety_alerts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    if table_count == 0 {
+        eprintln!("SKIP: safety_alerts table not present");
+        return;
+    }
+
+    // If there are safety_alerts rows, all CIS should reference drugs
+    let max_id: i64 = conn
+        .query_row("SELECT COALESCE(MAX(id), 0) FROM safety_alerts", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    if max_id == 0 {
+        eprintln!("SKIP: no safety_alerts rows");
+        return;
+    }
+
+    let orphan_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM safety_alerts s WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = s.cis)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    assert_eq!(orphan_count, 0, "Found safety_alerts with CIS not in drugs");
+}

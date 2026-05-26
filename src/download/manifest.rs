@@ -37,7 +37,7 @@ pub struct FileSchema {
     pub target_table: &'static str,
 }
 
-/// All 10 stable BDPM files (CIS_InfoImportantes excluded — safety-critical, Phase 3.5)
+/// All 11 BDPM files (10 stable + CIS_InfoImportantes for safety data).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[allow(non_camel_case_types)]
 pub enum BDPMFile {
@@ -61,6 +61,8 @@ pub enum BDPMFile {
     CIS_MITM,
     /// HAS transparency committee links — UTF-8, pure ASCII
     HAS_LiensPageCT_bdpm,
+    /// Safety alerts — CIS, dates, warning text with embedded HTML links
+    CIS_InfoImportantes,
 }
 
 impl BDPMFile {
@@ -82,6 +84,7 @@ impl BDPMFile {
             BDPMFile::CIS_CIP_Dispo_Spec => &CIS_CIP_DISPO_SPEC,
             BDPMFile::CIS_MITM => &CIS_MITM,
             BDPMFile::HAS_LiensPageCT_bdpm => &HAS_LIENS_PAGE_CT_BDPM,
+            BDPMFile::CIS_InfoImportantes => &CIS_INFO_IMPORTANTES,
         }
     }
 
@@ -95,7 +98,7 @@ impl BDPMFile {
         self.schema().target_table
     }
 
-    /// All 10 stable files in the order used by the monthly sync.
+    /// All 11 files in the order used by the monthly sync.
     pub fn all() -> Vec<BDPMFile> {
         vec![
             BDPMFile::CIS_bdpm,
@@ -108,6 +111,7 @@ impl BDPMFile {
             BDPMFile::CIS_CIP_Dispo_Spec,
             BDPMFile::CIS_MITM,
             BDPMFile::HAS_LiensPageCT_bdpm,
+            BDPMFile::CIS_InfoImportantes,
         ]
     }
 
@@ -238,6 +242,21 @@ const HAS_LIENS_PAGE_CT_BDPM: FileSchema = FileSchema {
     date_fields: &[],
     has_trailing_tab_fix: false,
     target_table: "has_links",
+};
+
+const CIS_INFO_IMPORTANTES: FileSchema = FileSchema {
+    name: "CIS_InfoImportantes",
+    filename: "CIS_InfoImportantes.txt",
+    // Note: different path pattern — no `/file/` segment (on-demand generation)
+    download_path: "/download/CIS_InfoImportantes.txt",
+    encoding: Encoding::Windows1252,
+    field_count: 4,
+    date_fields: &[
+        (1, DateFormat::DDMMYYYY), // start_date
+        (2, DateFormat::DDMMYYYY), // end_date
+    ],
+    has_trailing_tab_fix: false,
+    target_table: "safety_alerts",
 };
 
 #[cfg(test)]

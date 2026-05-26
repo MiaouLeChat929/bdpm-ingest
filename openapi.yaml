@@ -134,6 +134,34 @@ paths:
                 $ref: '#/components/schemas/DrugDetail'
         '404':
           description: Drug not found
+  /drugs/{cis}/safety:
+    get:
+      tags:
+      - api::safety
+      summary: GET /drugs/{cis}/safety
+      description: |-
+        Returns safety alerts for a drug from the `safety_alerts` table.
+
+        - **404** if CIS does not exist in the database
+        - **200** with `data_available: false` if no alerts are stored
+        - **200** with alert list if data exists
+      operationId: drug_safety
+      parameters:
+      - name: cis
+        in: path
+        description: CIS drug identifier
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Safety alerts found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SafetyResponse'
+        '404':
+          description: CIS not found in database
   /generic-groups:
     get:
       tags:
@@ -396,20 +424,39 @@ components:
         reimbursable:
           type: string
           nullable: true
+    SafetyAlert:
+      type: object
+      description: A single safety alert.
+      required:
+      - message
+      properties:
+        end_date:
+          type: string
+          nullable: true
+        message:
+          type: string
+        source_url:
+          type: string
+          nullable: true
+        start_date:
+          type: string
+          nullable: true
     SafetyResponse:
       type: object
-      description: Safety info response (stub).
+      description: Safety info response.
       required:
       - cis
       - data_available
-      - message
+      - alerts
       properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/SafetyAlert'
         cis:
           type: string
         data_available:
           type: boolean
-        message:
-          type: string
 tags:
 - name: bdpm-ingest
   description: BDPM Drug Database API

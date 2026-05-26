@@ -169,7 +169,7 @@ fn main() -> Result<()> {
             let tables = [
                 "drugs", "presentations", "compositions", "generic_groups",
                 "prescription_rules", "smr", "asmr", "availability",
-                "atc_codes", "mitm", "has_links",
+                "atc_codes", "mitm", "has_links", "safety_alerts",
             ];
 
             for table in tables {

@@ -254,6 +254,25 @@ fn import_file(
                         v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
                     ])
                 }
+                BDPMFile::CIS_InfoImportantes => {
+                    let v = &row.values;
+                    let raw = v[3].as_deref().unwrap_or("");
+                    // Split "message text https://url" — URL is always at the end if present
+                    let (msg, url) = if let Some(idx) = raw.rfind("https://") {
+                        let m = raw[..idx].trim().to_string();
+                        let u = raw[idx..].trim().to_string();
+                        (m, Some(u))
+                    } else {
+                        (raw.to_string(), None)
+                    };
+                    stmt.execute(rusqlite::params![
+                        v[0].as_deref().unwrap_or(""), // cis
+                        v[1].as_deref().unwrap_or(""), // start_date
+                        v[2].as_deref().unwrap_or(""), // end_date
+                        msg,
+                        url,
+                    ])
+                }
             };
 
             match res {
@@ -322,6 +341,10 @@ fn insert_sql(file: BDPMFile) -> String {
         BDPMFile::HAS_LiensPageCT_bdpm => {
             "INSERT OR IGNORE INTO has_links (ct_id, url)
              VALUES (?1,?2)".into()
+        }
+        BDPMFile::CIS_InfoImportantes => {
+            "INSERT OR IGNORE INTO safety_alerts (cis, start_date, end_date, message_plain, source_url)
+             VALUES (?1,?2,?3,?4,?5)".into()
         }
     }
 }

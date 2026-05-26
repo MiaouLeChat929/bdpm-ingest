@@ -1,96 +1,100 @@
-//! Safety information endpoint (stub).
+//! Safety information endpoint.
 //!
-//! CIS_InfoImportantes data requires dedicated scraping from the BDPM website.
-//! This is a minimal stub that validates the CIS exists and returns placeholder data.
+//! Serves safety alerts from the `safety_alerts` table (populated by
+//! CIS_InfoImportantes.txt import). Falls back to stub when no data.
 
 use axum::{extract::{Path, State}, http::StatusCode, Json};
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use utoipa::ToSchema;
 
-use crate::cache::TtlCache;
 use crate::api::AppState;
 
-/// Safety info response (stub).
-#[derive(Serialize, utoipa::ToSchema)]
+/// Safety info response.
+#[derive(Serialize, ToSchema)]
 pub struct SafetyResponse {
     pub cis: String,
     pub data_available: bool,
+    pub alerts: Vec<SafetyAlert>,
+}
+
+/// A single safety alert.
+#[derive(Serialize, ToSchema)]
+pub struct SafetyAlert {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
     pub message: String,
-}
-
-/// Cache for safety data — 6-hour TTL per BRIEF.md Phase 3.5.
-pub type SafetyCache = TtlCache<String, SafetyData>;
-
-/// Cached safety data.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SafetyData {
-    pub cis: String,
-    pub warnings: Vec<String>,
-    pub contraindications: Vec<String>,
-    pub pregnancy_category: Option<String>,
-    pub breastfeeding: Option<String>,
-    pub fetched_at: i64,  // Unix timestamp (seconds)
-}
-
-/// Check if a CIS exists in the database.
-fn cis_exists(db_path: &std::path::Path, cis: &str) -> bool {
-    let conn = match Connection::open(db_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    conn.query_row(
-        "SELECT 1 FROM drugs WHERE cis = ?1 LIMIT 1",
-        [cis],
-        |_| Ok(true),
-    )
-    .unwrap_or(false)
+    pub source_url: Option<String>,
 }
 
 /// GET /drugs/{cis}/safety
 ///
-/// Returns safety information for a drug.
+/// Returns safety alerts for a drug from the `safety_alerts` table.
 ///
 /// - **404** if CIS does not exist in the database
-/// - **200** with `data_available: false` if real data is not yet available
-/// - **200** with actual safety data (future, when scraping is implemented)
+/// - **200** with `data_available: false` if no alerts are stored
+/// - **200** with alert list if data exists
+#[utoipa::path(
+    get,
+    path = "/drugs/{cis}/safety",
+    params(
+        ("cis" = String, Path, description = "CIS drug identifier")
+    ),
+    responses(
+        (status = 200, description = "Safety alerts found", body = SafetyResponse),
+        (status = 404, description = "CIS not found in database"),
+    )
+)]
 pub async fn drug_safety(
     Path(cis): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<SafetyResponse>, StatusCode> {
-    // Validate CIS exists
     let db_path = state.db_path.clone();
-    let cis_for_check = cis.clone();
+    let cis_owned = cis.clone();
 
-    let exists = tokio::task::spawn_blocking(move || cis_exists(&db_path, &cis_for_check))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let alerts = tokio::task::spawn_blocking(move || -> Option<Vec<SafetyAlert>> {
+        let conn = Connection::open(&db_path).ok()?;
 
-    if !exists {
-        return Err(StatusCode::NOT_FOUND);
-    }
+        // Verify CIS exists
+        let exists: bool = conn.query_row(
+            "SELECT 1 FROM drugs WHERE cis = ?1 LIMIT 1",
+            [&cis_owned],
+            |_| Ok(true),
+        ).ok()?;
 
-    // Check cache for existing data
-    let cache = &state.safety_cache;
-    if let Some(cached) = cache.get(&cis) {
-        // Check if cached data is stale
-        if cache.is_stale(&cis) {
-            return Ok(Json(SafetyResponse {
-                cis: cached.cis,
-                data_available: true,
-                message: "Stale data (cache expired, refetch pending)".to_string(),
-            }));
+        if !exists {
+            return None;
         }
-        return Ok(Json(SafetyResponse {
-            cis: cached.cis,
-            data_available: true,
-            message: "Safety data from cache".to_string(),
-        }));
-    }
 
-    // No cached data — return stub response
-    Ok(Json(SafetyResponse {
-        cis,
-        data_available: false,
-        message: "Safety data not yet available. This is a stub response.".to_string(),
-    }))
+        // Query safety alerts
+        let mut stmt = conn.prepare(
+            "SELECT start_date, end_date, message_plain, source_url
+             FROM safety_alerts WHERE cis = ?1
+             ORDER BY start_date DESC"
+        ).ok()?;
+
+        let rows = stmt.query_map([&cis_owned], |row| {
+            Ok(SafetyAlert {
+                start_date: row.get(0).ok(),
+                end_date: row.get(1).ok(),
+                message: row.get::<_, String>(2).unwrap_or_default(),
+                source_url: row.get(3).ok(),
+            })
+        }).ok()?;
+
+        let alerts: Vec<SafetyAlert> = rows.filter_map(|r| r.ok()).collect();
+        Some(alerts)
+    }).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match alerts {
+        None => Err(StatusCode::NOT_FOUND),
+        Some(alerts) => {
+            let data_available = !alerts.is_empty();
+            Ok(Json(SafetyResponse {
+                cis,
+                data_available,
+                alerts,
+            }))
+        }
+    }
 }

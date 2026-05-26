@@ -12,6 +12,7 @@ use crate::api;
         api::atc::atc_detail,
         api::availability::availability,
         api::health,
+        api::safety::drug_safety,
     ),
     components(schemas(
         api::search::DrugSearchResult,
@@ -24,6 +25,7 @@ use crate::api;
         api::atc::AtcDetail,
         api::availability::AvailabilityRow,
         api::safety::SafetyResponse,
+        api::safety::SafetyAlert,
         api::HealthResponse,
     )),
     tags(

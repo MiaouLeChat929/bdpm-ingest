@@ -1,7 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::Json, Router, routing::get};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::task::spawn_blocking;
 
 pub mod drugs;
@@ -12,14 +11,9 @@ pub mod availability;
 pub mod openapi;
 pub mod safety;
 
-pub use safety::SafetyData;
-
-use crate::cache::TtlCache;
-
 #[derive(Clone)]
 pub struct AppState {
     pub db_path: PathBuf,
-    pub safety_cache: Arc<TtlCache<String, SafetyData>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -31,9 +25,7 @@ pub struct HealthResponse {
 
 /// Start the axum HTTP server on the given address.
 pub async fn run_server(addr: &str, db_path: PathBuf) {
-    // 6-hour TTL cache for safety data (per BRIEF.md Phase 3.5)
-    let safety_cache = Arc::new(TtlCache::new(std::time::Duration::from_secs(6 * 3600)));
-    let state = AppState { db_path, safety_cache };
+    let state = AppState { db_path };
     let app = Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(openapi::openapi_json))

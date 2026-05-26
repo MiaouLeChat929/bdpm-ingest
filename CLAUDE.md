@@ -111,3 +111,21 @@ These will break silently if violated:
 4. **`str::replace(old, new)` — both args must be `&str`, not `char`** — `s.replace('\u{2019}', '\'')` is invalid. Use `s.replace("\u{2019}", "'")`.
 
 5. **`unwrap_or(ns())` where `ns` is a closure** — the closure return type influences `unwrap_or`'s type inference, causing type mismatch. Just use `unwrap_or("")` directly.
+
+## Rust Compilation Shortcuts (from global CLAUDE.md)
+
+Fix Rust compilation errors at the tool level without re-running cargo:
+
+- **Quick error scan**: `cargo check 2>&1 | grep -E "^error"` — no context overhead
+- **Missing trait impl**: grep for the actual trait in `~/.cargo/registry/src/`, find the concrete impl
+- **Byte-level corruption** in source (e.g. `\x5c` literal bytes): Python binary replace:
+  ```python
+  data = open('src/file.rs', 'rb').read()
+  data = data.replace(b'\x5c&', b'&')  # fix literal backslash+ampersand in tokens
+  open('src/file.rs', 'wb').write(data)
+  ```
+  The Edit tool's escaping layer can produce literal `\x5c` bytes in `&`-prefixed Rust expressions. Byte-level fix is the only solution.
+- **`?` on wrong type**: check if the return type changed (e.g. `init_db` returning `Connection` vs `Result<Connection>`)
+- **`std::io::Read` not imported**: `use std::io::Read`
+- **`IntoRustString` for Response`**: ureq 2.x → `into_reader()` + `read_to_end()`
+- **`unwrap_or(ns())`** where `ns()` is a closure returning `&str`: the closure return type influences `unwrap_or`, causing type mismatch → just use `unwrap_or("")`

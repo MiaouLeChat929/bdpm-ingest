@@ -25,6 +25,7 @@ pub fn normalize_row(file: crate::download::manifest::BDPMFile, row: &crate::par
         crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec => normalize_dispo(f),
         crate::download::manifest::BDPMFile::CIS_MITM => normalize_mitm(f),
         crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm => normalize_liens(f),
+        crate::download::manifest::BDPMFile::CIS_InfoImportantes => normalize_info_importantes(f),
     }
 }
 
@@ -208,6 +209,22 @@ fn normalize_liens(f: &[String]) -> NormalizedRow {
         values: vec![
             Some(f[0].clone()),
             Some(f[1].clone()),
+        ],
+    }
+}
+
+fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
+    // 4 fields: cis, start_date (JJ/MM/AAAA), end_date (JJ/MM/AAAA), message + url (HTML)
+    // The message field contains embedded <a href="..."> links — strip HTML, keep text
+    let raw_msg = strip_avis_html(&f[3]);
+    NormalizedRow {
+        table: "safety_alerts",
+        values: vec![
+            Some(f[0].clone()),                        // cis
+            parse_date_ddmmYYYY(&f[1]).ok(),           // start_date → ISO
+            parse_date_ddmmYYYY(&f[2]).ok(),           // end_date → ISO
+            Some(raw_msg),                             // message_plain (HTML stripped)
+            None,                                      // source_url (extracted at import time)
         ],
     }
 }
