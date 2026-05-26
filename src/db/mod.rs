@@ -1,3 +1,5 @@
+pub mod fts;
+
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 
@@ -16,6 +18,9 @@ pub fn init_db(path: &std::path::Path) -> Connection {
     migrations.to_latest(&mut conn).expect("Migration failed");
 
     fix_smr_asmr_constraints(&mut conn);
+
+    // Create FTS5 virtual table and sync triggers
+    fts::create_fts_tables(&conn).ok();
 
     tracing::info!("Database initialized at {}", path.display());
     conn

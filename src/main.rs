@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
+mod api;
 mod db;
 mod download;
 mod import;
@@ -60,6 +61,13 @@ enum Command {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
     },
+    /// Start the HTTP API server for drug search.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: String,
+        #[arg(long, default_value = "data/bdpm.db")]
+        db_path: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -70,6 +78,16 @@ fn main() -> Result<()> {
     let cmd = Command::parse();
 
     match cmd {
+        Command::Serve { addr, db_path } => {
+            if !db_path.exists() {
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
+            }
+            println!("Starting server on {}...", addr);
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(api::run_server(&addr, db_path));
+            return Ok(());
+        }
+
         Command::Check { data_dir } => {
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(data_dir.join("raw"))?;
