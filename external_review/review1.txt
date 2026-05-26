@@ -1,0 +1,82 @@
+Le script final a été corrigé et testé. Voici le résumé complet de l'affinage :
+
+---
+
+## Résultats des tests sur `CIS_CIP_Dispo_Spec.txt`
+
+| Test | Résultat |
+|------|----------|
+| **Encodage** | UTF-8 détecté correctement, 0 caractères de remplacement |
+| **Colonnes parsées** | **8/8** ✅ (CIS, CIP13, code_statut, libelle_statut, date_debut, date_mise_a_jour, date_remise_disposition, lien_ansm) |
+| **CIP13 vide** | Géré (`None` en SQLite) — signifie "toutes les présentations concernées" |
+| **Dates** | `JJ/MM/AAAA` → `YYYY-MM-DD` (ISO-8601) conversion parfaite |
+| **Quirks** | **0 quirks** sur les données de test |
+
+---
+
+## Correction majeure apportée au script
+
+**Problème détecté** : L'index FTS5 avec `content=` et `content_rowid=` provoquait une corruption SQLite (`database disk image is malformed`) lors de la synchronisation.
+
+**Solution** : Table FTS5 **autonome** sans `content=` — synchronisation manuelle explicite via `sync_fts5()` :
+
+```python
+# AVANT (corrompu)
+CREATE VIRTUAL TABLE search_specialites USING fts5(
+    ..., content=specialites, content_rowid=rowid
+)
+
+# APRÈS (corrigé)
+CREATE VIRTUAL TABLE search_specialites USING fts5(
+    denomination, forme_pharmaceutique, voies_administration
+)
+```
+
+---
+
+## Schéma validé du fichier `disponibilites`
+
+| # | Colonne | Type | Exemple |
+|---|---------|------|---------|
+| 0 | `cis` | TEXT | `612202001` |
+| 1 | `cip13` | TEXT (nullable) | `3400936122020015` ou `NULL` |
+| 2 | `code_statut` | INTEGER | **1**=Rupture, **2**=Tension, **3**=Arrêt, **4**=Remise |
+| 3 | `libelle_statut` | TEXT | `"Rupture de stock"` |
+| 4 | `date_debut` | DATE | `2026-05-21` |
+| 5 | `date_mise_a_jour` | DATE | `2026-05-21` |
+| 6 | `date_remise_disposition` | DATE (nullable) | `2026-05-22` ou `NULL` |
+| 7 | `lien_ansm` | TEXT (nullable) | URL ou `NULL` |
+
+---
+
+## Améliorations intégrées dans la version finale
+
+- **Log des quirks** : Tous les problèmes de parsing sont appendés dans `bdpm_data/quirks.log` pour audit
+- **Nouveau helper** : `get_reprises()` pour les remises à disposition (`code_statut=4`)
+- **FTS5 autonome** : Recherche full-text stable et performante
+- **Padding automatique** : Si une ligne a moins de colonnes que le schéma, les champs manquants sont complétés avec `NULL`
+
+---
+
+## Téléchargement
+
+**[bdpm_sqlite_builder.py](sandbox:///mnt/agents/output/bdpm_sqlite_builder.py)** — Script final testé et corrigé
+
+---
+
+## Prochaine étape suggérée
+
+Maintenant que la base SQLite est fiable, tu peux l'utiliser comme **backend du bot Twitter/Bluesky** :
+
+```python
+from bdpm_sqlite_builder import BDPMBuilder
+
+builder = BDPMBuilder()
+builder.update()  # Check + download + ingest si maj
+
+# Récupère les nouvelles ruptures
+for r in builder.get_ruptures_actives():
+    print(f"🔴 {r['denomination']} — {r['libelle_statut']}")
+```
+
+Tu veux que je passe à l'intégration avec le bot de publication (Bluesky/Twitter) en utilisant cette base comme source de données ?

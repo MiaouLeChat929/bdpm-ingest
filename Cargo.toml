@@ -1,0 +1,65 @@
+[package]
+name = "bdpm-ingest"
+version = "0.1.0"
+edition = "2021"
+authors = ["Felix"]
+description = "French public drug database (BDPM) ingest pipeline"
+
+[lib]
+name = "bdpm_ingest"
+path = "src/lib.rs"
+[[bin]]
+name = "bdpm-ingest"
+path = "src/main.rs"
+
+[dependencies]
+# SQLite — bundled for CI portability
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# HTTP fetcher — synchronous, no async runtime needed
+ureq = { version = "2", features = ["native-tls"] }
+
+# Content hashing — BLAKE3 is 4-10x faster than SHA-256 for change detection
+blake3 = "1.5"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Serialization (state store)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Encoding — BDPM files use Windows-1252 and UTF-8
+encoding_rs = "0.8"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time (lighter than chrono)
+time = "0.3"
+
+# RFC3339 timestamps in state store
+chrono = "0.4"
+
+# HTML stripping
+regex-lite = "0.1"
+
+# Versioned migrations
+rusqlite_migration = "1"
+
+# API server (Phase 2 only)
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# OpenAPI generation (Phase 2)
+utoipa = "4"
+
+[profile.release]
+opt-level = 3
+lto = true

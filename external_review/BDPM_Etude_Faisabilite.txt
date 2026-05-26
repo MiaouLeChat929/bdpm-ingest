@@ -1,0 +1,769 @@
+E T U D E D E FA I S A B I L I T E T EC H N I Q U E
+
+
+
+BDPM
+Pipeline Rust & Base SQLite
+Methodologie de collecte, parsing, normalisation
+et architecture pour un projet Rust
+
+       Analyse approfondie des 11 fichiers de donnees de la Base de Donnees Publique des
+       Medicaments : encodages multiples, incoherences de format, integrite referentielle,
+       strategies de mise a jour, schema SQLite propose et architecture de pipeline en 5
+       crates Rust.
+
+
+
+
+Mai 2026
+Z.ai
+Table des matieres
+  1. Etat des lieux des sources BDPM                                                                        3
+      1.1 Inventaire des fichiers publiés . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+      1.2 Frequence et logique de mise a jour . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+      1.3 Relations entre fichiers . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+  2. Problemes de qualite et de format a anticiper                                                          5
+      2.1 Encodage : trois normes cohabitent . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+      2.2 Fins de ligne incoherentes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+      2.3 Formats de date incoherents . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+      2.4 Champs a forte vacuite . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+      2.5 Virgule comme separateur decimal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+      2.6 Contenu HTML dans les donnees . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+      2.7 Integrite referentielle : orphelins constates . . . . . . . . . . . . . . . . . . . . . . . . . 6
+  3. Methodologie de collecte et de mise a jour                                                             7
+      3.1 Strategie de telechargement respectueuse . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+      3.2 Detection de changement : comparison des approches . . . . . . . . . . . . . . . . . . . 8
+      3.3 Structure de traçabilite . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+  4. Strategie de parsing, normalisation et controle qualite                                                8
+      4.1 Pipeline de parsing en 5 etapes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+      4.2 Controle qualite : checks automatises . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+  5. Proposition de schema SQLite                                                                         10
+      5.1 Principes de design . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+      5.2 Schema detaille . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+      5.3 Types SQLite et contraintes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+  6. Architecture de pipeline pour un developpement Rust                                                  11
+      6.1 Vue d'ensemble de l'architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+      6.2 Structure de donnees centrale (bdpm-core) . . . . . . . . . . . . . . . . . . . . . . . . 12
+      6.3 Gestion des encodages en Rust . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+      6.4 Integration SQLite : rusqlite . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+      6.5 Modele d'import incremental . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+  7. Priorites de mise en oeuvre                                                                          13
+  8. Points a valider par des tests ou observations supplementaires                                       14
+      8.1 Stabilite du schema dans le temps . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      8.2 Comportement du serveur sous charge . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      8.3 Site de recette ANSM . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      8.4 Existence du dump MySQL . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      8.5 Comportement des lignes vides dans CIS_CPD . . . . . . . . . . . . . . . . . . . . . . . 14
+      8.6 Verifier l'absence de crate Rust existante . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+9. Risques techniques et angles morts                                                                   15
+   9.1 Risques identifies . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+   9.2 Angles morts . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+10. Synthese et recommandations finales                                                                 16
+1. Etat des lieux des sources BDPM
+La Base de Donnees Publique des Medicaments (BDPM) est la reference officielle francaise pour les
+donnees ouvertes sur les medicaments commercialises en France. Elle est alimentee par l'ANSM
+(Agence nationale de securite du medicament), la HAS (Haute Autorite de Sante) et l'Assurance
+Maladie. Sa creation decoule de l'article L. 161-40-1 du Code de la Securite Sociale (loi n. 2011-2012 du
+29/12/2011). Les donnees sont distribuees sous licence Etalab 2.0, qui autorise librement la
+reproduction, la distribution et l'exploation, sous reserve de ne pas alterer les donnees ni en denaturer
+le sens, et de citer la source avec sa date de mise a jour.
+
+
+1.1 Inventaire des fichiers publiés
+La                    page                        de                  telechargement                        officielle
+(https://base-donnees-publique.medicaments.gouv.fr/telechargement) met a disposition 11 fichiers
+de donnees au format TXT (tabulation-separe), complementes par un document PDF de specification
+du format (v4, 581 Ko). L'ensemble represente environ 27,6 Mo de donnees brutes. L'inspection
+detaillee de chaque fichier, realisee pour cette etude, confirme que le separateur est uniformement la
+tabulation, qu'aucun fichier ne comporte de ligne d'en-tete, et qu'aucun delimitateur de champ
+(guillemets) n'est utilise.
+
+
+                                                                                                             Fins de
+         Fichier                            Contenu              Lignes      Colonnes       Encodage
+                                                                                                              ligne
+
+CIS_bdpm.txt                  Specialites                        15 848          12          cp1252           CRLF
+
+CIS_CIP_bdpm.txt              Presentations                      20 903          13            utf-8           LF
+
+CIS_COMPO_bdpm.txt            Compositions                       32 389          8           cp1252           CRLF
+
+CIS_HAS_SMR_bdpm.txt          Avis SMR                           15 257          6           cp1252           CRLF
+
+CIS_HAS_ASMR_bdpm.txt         Avis ASMR                           9 906          6           cp1252           CRLF
+
+HAS_LiensPageCT_bdpm.t
+                              Liens CT                           10 342          2          utf-8/ASCII       CRLF
+xt
+
+CIS_GENER_bdpm.txt            Groupes generiques                 10 704          5           cp1252           CRLF
+
+CIS_CPD_bdpm.txt              Conditions prescription            28 151          2           cp1252          CRLF*
+
+CIS_CIP_Dispo_Spec.txt        Ruptures de stock                    766           8            latin-1         CRLF
+
+CIS_MITM.txt                  Med. interet ther. majeur           7 711          4           cp1252           CRLF
+
+CIS_InfoImportantes.txt       Infos securite (dynamique)         10 189          4             utf-8           LF
+
+  Tableau 1 : Inventaire complet des fichiers BDPM avec caracteristiques techniques constatees. * CIS_CPD contient 9
+                                      lignes vides dues a des sequences CR+CR+LF.
+
+
+
+
+1.2 Frequence et logique de mise a jour
+La BDPM est officiellement actualisee tous les mois. Neanmoins, l'inspection des dates de mise a jour
+affichees sur la page de telechargement revele une cadence variable selon les fichiers. La plupart des
+fichiers portent la date du 28/04/2026, mais CIS_CIP_bdpm.txt indique le 25/05/2026
+(rafraichissement inter-cycle pour les donnees de prix et de remboursement), CIS_CIP_Dispo_Spec.txt
+le 19/05/2026 (les ruptures de stock sont mises a jour plus frequemment), et CIS_MITM.txt le
+09/03/2026 (mise a jour moins frequente). Le fichier CIS_InfoImportantes.txt est un cas particulier : il
+est genere dynamiquement a chaque telechargement, comme en temoigne l'en-tete HTTP
+Content-Disposition         qui         inclut         un         horodatage          precis          (ex      :
+CIS_InfoImportantes_20260526111334_bdpm.txt). Ce fichier peut donc changer a tout moment entre
+les cycles mensuels, car les informations de securite peuvent etre publiees en urgence.
+
+Il n'existe aucun flux RSS, aucune API de notification, aucun changelog officiel, ni aucun mecanisme de
+versionnement semantique des donnees. La seule facon de detecter un changement est de telecharger
+les fichiers et de les comparer avec la version precedente. Le serveur ne fournit ni ETag, ni
+Last-Modified, ni Content-Length dans les reponses HEAD. La politique de cache est uniformement :
+Cache-Control: private, must-revalidate ; Pragma: no-cache ; Expires: 0. En pratique, cela signifie que
+chaque requete entraine un telechargement complet du fichier, sans possibilite de requete
+conditionnelle (If-None-Match ou If-Modified-Since).
+
+
+1.3 Relations entre fichiers
+Le Code CIS (8 chiffres, prefixe 6) est la cle de jointure universelle, present dans 10 des 11 fichiers. Le
+fichier CIS_bdpm.txt constitue la table maitresse avec 15 848 specialites uniques et sans doublon. La
+seule exception structurelle est HAS_LiensPageCT_bdpm.txt, qui ne contient pas de Code CIS mais un
+Code de dossier HAS, servant de cle de jointure vers les fichiers SMR et ASMR. Le schema relationnel se
+deploie donc en etoile autour du Code CIS, avec une branche secondaire HAS via le Code de dossier.
+
+
+           Fichier                  Cle primaire                Cle etrangere               Vers table
+
+  CIS_bdpm.txt                        Code CIS                         -                       (racine)
+
+  CIS_CIP_bdpm.txt                  CIP7 / CIP13                   Code CIS                 CIS_bdpm
+
+                                  (Code CIS + Code
+  CIS_COMPO_bdpm.txt                                               Code CIS                 CIS_bdpm
+                                     substance)
+
+                                                            Code CIS + Code dossier
+  CIS_HAS_SMR_bdpm.txt       (CIS + dossier HAS + date)                               CIS_bdpm + LiensPageCT
+                                                                      HAS
+
+                                                            Code CIS + Code dossier
+  CIS_HAS_ASMR_bdpm.txt      (CIS + dossier HAS + date)                               CIS_bdpm + LiensPageCT
+                                                                      HAS
+
+  HAS_LiensPageCT_bdpm.t                                                                  (reference pour
+                                  Code dossier HAS                     -
+  xt                                                                                        SMR/ASMR)
+
+  CIS_GENER_bdpm.txt          (Identifiant groupe + CIS)           Code CIS                 CIS_bdpm
+
+  CIS_CPD_bdpm.txt                   (Code CIS)                    Code CIS                 CIS_bdpm
+
+  CIS_InfoImportantes.txt           (CIS + dates)                  Code CIS                 CIS_bdpm
+  CIS_CIP_Dispo_Spec.txt                (CIS + CIP13)             Code CIS + CIP13           CIS_bdpm + CIS_CIP
+
+  CIS_MITM.txt                           (Code CIS)                   Code CIS                      CIS_bdpm
+
+ Tableau 2 : Schema relationnel des fichiers BDPM. Les parentheses indiquent les cles composites implicites (pas de cle
+                                         primaire declarative dans les fichiers).
+
+
+
+
+2. Problemes de qualite et de format a anticiper
+2.1 Encodage : trois normes cohabitent
+C'est la decouverte la plus critique de cette etude. Les 11 fichiers utilisent trois encodages differents,
+sans aucun indicateur dans les fichiers eux-memes (pas de BOM, pas de declaration XML, pas
+d'en-tete). Sept fichiers utilisent cp1252 (Windows-1252), un utilise latin-1 (ISO-8859-1), et trois
+utilisent UTF-8. La distinction entre cp1252 et latin-1 est essentielle : cp1252 definit des caracteres
+dans la plage 0x80-0x9F que latin-1 laisse non definis. En pratique, le caractere 0x92 (apostrophe
+courbe droite, U+2019 en Unicode) apparait massivement dans les fichiers HAS : 29 704 occurrences
+dans CIS_HAS_ASMR et 22 253 dans CIS_HAS_SMR. Decoder ces fichiers en latin-1 produirait des
+caracteres de controle invisibles au lieu des apostrophes attendues. L'encodage correct pour chaque
+fichier est determinant et doit etre code en dur dans le parser, car il n'existe aucun moyen fiable de le
+detecter automatiquement a 100% (les detecteurs statistiques confondent cp1252 et latin-1).
+
+
+    Encodage                       Fichiers                                       Piege principal
+
+                   CIS_bdpm, CIS_COMPO, CIS_CPD,
+                                                               0x92 = apostrophe courbe (U+2019), 0x85 = points de
+     cp1252        CIS_GENER, CIS_HAS_ASMR,
+                                                               suspension. Latin-1 echoue sur ces octets.
+                   CIS_HAS_SMR, CIS_MITM
+
+                                                               Pas de smart quotes, mais des accents (0xE0 = a
+      latin-1      CIS_CIP_Dispo_Spec
+                                                               grave). UTF-8 echouerait sur ces octets.
+
+                   CIS_CIP_bdpm, CIS_InfoImportantes,          Contient des smart quotes en UTF-8 natif
+      utf-8
+                   HAS_LiensPageCT                             (\xE2\x80\x99). Deja en NFC.
+
+                     Tableau 3 : Cartographie des encodages par fichier avec les pieges principaux.
+
+
+
+
+2.2 Fins de ligne incoherentes
+Neuf fichiers utilisent CRLF (\r\n) et deux utilisent LF (\n). Cette incoherence est classique dans les
+fichiers produits par des equipes ou systemes differents. Le cas le plus problematique est
+CIS_CPD_bdpm.txt, qui contient 6 positions avec des sequences \r\r\n (double CR avant LF), generant 9
+lignes vides parasites dans le fichier. Un parser robuste doit (a) normaliser systematiquement les fins
+de ligne en supprimant les \r residuels, et (b) filtrer les lignes vides avant le split tabulation.
+
+
+2.3 Formats de date incoherents
+Deux formats de date coexistent dans les fichiers BDPM, sans que cela soit clairement indique dans la
+documentation      PDF.    Les     fichiers   CIS_bdpm,     CIS_CIP_bdpm,      CIS_InfoImportantes     et
+CIS_CIP_Dispo_Spec     utilisent   le   format   DD/MM/YYYY       (ex   :   28/04/2026).    Les   fichiers
+CIS_HAS_SMR_bdpm et CIS_HAS_ASMR_bdpm utilisent le format YYYYMMDD (ex : 20260428).
+L'analyse exhaustive confirme que ces formats sont strictement respectes dans chaque fichier (100%
+de conformite dans les deux cas, zero exception), ce qui facilite la normalisation. Le pipeline d'import
+doit convertir systematiquement vers un format unique en base (ISO 8601 YYYY-MM-DD
+recommande).
+
+
+2.4 Champs a forte vacuite
+Plusieurs colonnes ont des taux de remplissage tres faibles, ce qui influence le design du schema SQLite
+et les strategies d'indexation. La colonne StatutBdm de CIS_bdpm est vide a 85,8% (la plupart des
+medicaments n'ont pas de statut special). La colonne agrément aux collectivites de CIS_CIP_bdpm est
+vide a 96,1%. La colonne CIP13 de CIS_CIP_Dispo_Spec est vide a 95,4% (les fiches de rupture
+concernent souvent la specialite dans son ensemble, pas une presentation individuelle). Ces taux de
+vacuite sont normaux et prevus par le modele de donnees, mais ils doivent etre pris en compte pour
+eviter des index inutiles sur des colonnes quasi-vides.
+
+
+2.5 Virgule comme separateur decimal
+Les champs numeriques (prix, taux de remboursement, honoraires) dans CIS_CIP_bdpm.txt utilisent la
+virgule comme separateur decimal, conformement a la convention francaise (ex : 24,34 euros). Sur les
+20 903 lignes, 13 546 contiennent un prix avec virgule, et 7 357 sont vides. Aucun prix n'utilise le point
+decimal. Le pipeline doit convertir systematiquement la virgule en point lors de l'import dans les
+colonnes de type REAL de SQLite.
+
+
+2.6 Contenu HTML dans les donnees
+Le fichier CIS_InfoImportantes.txt contient du HTML brut dans sa quatrieme colonne (champ texte).
+L'analyse revele 421 balises HTML distinctes, principalement des liens <a> avec target='_blank'
+pointant vers les pages de l'ANSM (ansm.sante.fr). Des entites HTML comme &ecirc; sont egalement
+presentes. Ce champ necessite un traitement specifique : soit le conserver tel quel (approche fidele a la
+source), soit extraire le texte pur et les URLs separrement (approche analytique). Pour une base SQLite
+destinee a etre requetee, la deuxieme approche est recommandee : separer le texte d'affichage et
+l'URL cible en deux colonnes distinctes.
+
+
+2.7 Integrite referentielle : orphelins constates
+L'analyse croisee des Codes CIS revele des references orphelines significatives, c'est-a-dire des Codes
+CIS presents dans des fichiers secondaires mais absents de la table maitresse CIS_bdpm.txt.
+CIS_HAS_SMR contient 2 806 Codes CIS orphelins (18,4% des references), CIS_HAS_ASMR en contient
+1 567 (15,8%), et CIS_GENER en contient 2 503 (23,5%). Ces orphelins correspondent
+vraisemblablement a des medicaments retire du marche depuis plus de 2 ans (le fichier CIS_bdpm ne
+conserve que les specialites commercialisees ou arretees depuis moins de 2 ans), mais dont les
+evaluations HAS restent dans l'historique. Le schema SQLite doit prevoir des cles etrangeres en mode
+nullable ou sans contrainte FOREIGN KEY stricte pour accommoder ces references sans perdre de
+donnees.
+
+
+                                                             %
+         Fichier          CIS uniques      Orphelins                                   Interpretation
+                                                          orphelins
+
+  CIS_CIP_bdpm               14 573             4           0,03%      Negligeable, probablement transitoire
+
+  CIS_COMPO_bdpm             15 846             0            0%        Parfaitement coherent
+
+                                                                       Evaluations de medicaments retires du
+  CIS_HAS_SMR                 9 014          2 806          18,4%
+                                                                       repertoire
+
+  CIS_HAS_ASMR                6 172          1 567          15,8%      Idem SMR
+
+                                                                       Groupes generiques incluant des principes
+  CIS_GENER                  10 628          2 503          23,5%
+                                                                       retires
+
+  CIS_InfoImportante
+                              4 208           965           9,5%       Alertes de securite sur medicaments retires
+  s
+
+  CIS_CPD                    12 492             0            0%        Parfaitement coherent
+
+  CIS_MITM                    7 711             0            0%        Parfaitement coherent
+
+Tableau 4 : Analyse des references orphelines par fichier. Les orphelins sont des Codes CIS absents de la table maitresse
+                                                     CIS_bdpm.txt.
+
+
+
+
+3. Methodologie de collecte et de mise a jour
+3.1 Strategie de telechargement respectueuse
+L'absence totale de mecanismes de cache conditionnel (pas d'ETag, pas de Last-Modified, pas de
+Content-Length dans les reponses HEAD) impose une strategie de telechargement basee sur le
+contenu. La methode la plus fiable et la plus respectueuse consiste a telecharger les fichiers
+periodiquement, a calculer un hash SHA-256 de chaque fichier, et a ne traiter que les fichiers dont le
+hash a change depuis le dernier import. Cette approche evite tout sursollicitation inutile de la source
+tout en garantissant la detection de tout changement.
+
+Pour la frequence de verification, deux regimes sont recommandes. Le regime standard verifie les 10
+fichiers statiques une fois par semaine (par exemple le lundi a 3h du matin), ce qui est largement
+suffisant vu la cadence mensuelle des mises a jour. Le regime dynamique verifie le fichier
+CIS_InfoImportantes.txt une fois par jour (ou deux fois, par exemple a 6h et 18h), car ce fichier est
+genere en temps reel et peut contenir des alertes de securite urgentes. Pour limiter la charge reseau,
+on peut limiter le telechargement de CIS_InfoImportantes.txt a la premiere verification quotidienne et
+ne le retelecharger que si la taille ou le hash differe.
+
+    Recommandation : telechargement hebdomadaire pour les 10 fichiers statiques + verification
+    quotidienne pour CIS_InfoImportantes.txt, avec detection de changement par SHA-256.
+3.2 Detection de changement : comparison des approches
+
+          Approche                     Faisabilite                     Fiabilite               Verdict
+
+                             Non disponible (serveur ne
+    ETag / If-None-Match                                                 N/A                   Ecartee
+                             fournit pas ETag)
+
+    Last-Modified /          Non disponible (serveur ne
+                                                                         N/A                   Ecartee
+    If-Modified-Since        fournit pas Last-Modified)
+
+                             Non disponible (Content-Length
+    HEAD + Content-Length                                                N/A                   Ecartee
+                             absent des HEAD)
+
+                                                                     100% : tout
+    SHA-256 du contenu       Pleine : on telecharge et on
+                                                                   changement est          Recommandee
+    telecharge               hash
+                                                                       detecte
+
+                                                                Partielle : la page peut
+    Date de la page HTML
+                             Possible via scraping de la page   ne pas etre mise a jour    Complementaire
+    de telechargement
+                                                                   immediatement
+
+                                                                Faible : un changement
+    Comparaison taille de
+                             Simple mais imprécise               peut garder la meme         Insuffisante
+    fichier
+                                                                          taille
+
+            Tableau 5 : Comparison des approches de detection de changement pour les fichiers BDPM.
+
+
+
+
+3.3 Structure de traçabilite
+Chaque import doit etre trace avec les metadonnees suivantes : horodatage de l'import, hash SHA-256
+de chaque fichier source, nombre de lignes lues, nombre de lignes inserees/mises a jour/supprimees,
+et statut de l'import (succes, partiel, echec). Cette table de log (nommee import_log dans le schema
+propose) constitue la base de la reproductibilite et du diagnostic. En cas de probleme, elle permet de
+savoir exactement quelle version de quel fichier a ete importee et quand.
+
+
+4. Strategie de parsing, normalisation et controle qualite
+4.1 Pipeline de parsing en 5 etapes
+Le parsing des fichiers BDPM doit suivre un pipeline deterministe en 5 etapes, chaque etape validant
+les sorties de la precedente. Ce pipeline est concu pour etre implementable en Rust de maniere
+efficace, avec un minimum d'allocation dynamique et un maximum de validation compile-time.
+
+Etape 1 : Telechargement et verifcation d'integrite
+  • Telecharger le fichier binaire (sans decodage texte a ce stade).
+  • Calculer le SHA-256 et le comparer au hash de l'import precedent. Si identique, court-circuiter.
+  • Stocker le fichier brut dans un repertoire d'archive horodate (ex : raw/2026-05-26/).
+Etape 2 : Decodage et normalisation des lignes
+  • Decoder le contenu binaire avec l'encodage specifique a chaque fichier (cp1252, latin-1 ou utf-8).
+     L'encodage est code en dur dans la configuration du parser, pas detecte dynamiquement.
+  • Normaliser les fins de ligne : supprimer tous les \r residuels. Filtrer les lignes vides resultant des
+     sequences \r\r\n (piege identifie dans CIS_CPD).
+  • Normaliser Unicode : convertir en NFC si necessaire (les fichiers UTF-8 sont deja en NFC, mais
+     cp1252 decode peut produire des formes decomposees dans certains cas).
+
+Etape 3 : Split tabulation et validation structurelle
+  • Decouper chaque ligne sur la tabulation (\t). Verifier le nombre de colonnes attendu. L'analyse
+     confirme 0% de lignes mal formees dans les fichiers actuels, mais le parser doit prevoir un mode
+     de recuperation : journaliser les lignes anormales sans interrompre l'import.
+  • Detecter les tabulations embarquees dans les champs (aucune constatee dans les donnees
+     actuelles, mais le risque existe theoriquement si un champ texte contient une tabulation).
+
+Etape 4 : Normalisation par champ
+  • Dates : Convertir DD/MM/YYYY et YYYYMMDD vers YYYY-MM-DD (ISO 8601). Les dates vides
+     restent NULL.
+  • Nombres : Remplacer la virgule decimale par un point (24,34 devient 24.34). Convertir en f64.
+  • Apostrophes : Normaliser les smart quotes (U+2019) issues de cp1252 vers l'apostrophe droite
+     (U+0027). Optionnel mais recommande pour la coherence en base.
+  • HTML : Pour CIS_InfoImportantes, extraire les URLs et le texte des balises <a>. Decoder les
+     entites HTML (&ecirc; vers e, etc.).
+  • Espaces : Trimmer les espaces en debut et fin de champ. Ne pas modifier les espaces internes.
+
+Etape 5 : Validation semantique et insertion
+  • Verifier les enumerations : StatutBdm dans {vide, Alerte, Warning disponibilite}, Nature
+     composant dans {SA, FT}, Type generique dans {0, 1, 2, 4}, etc. Journaliser les valeurs inattendues.
+  • Verifier l'existence du Code CIS dans la table maitresse. Les orphelins sont inserees avec un flag
+     is_orphan=1 plutot que rejetes.
+  • Inserer dans SQLite via une transaction par fichier (autocommit desactive pour la performance).
+
+
+4.2 Controle qualite : checks automatises
+Le pipeline doit integrer des checks de qualite executables apres chaque import. Ces checks doivent
+etre implementes comme des requetes SQL sur la base importee, et leur resultat doit etre journalise
+systematiquement. Les checks recommandes couvrent cinq categories : la completude (nombre de
+lignes importees vs nombre de lignes dans le fichier source, avec un seuil de tolerance de 0%), la
+coherence referentielle (nombre de CIS orphelins par table, avec alerte si le nombre augmente de plus
+de 5% par rapport a l'import precedent), la validite des enumerations (zero valeur hors domaine
+attendu), la coherence temporelle (les dates d'AMM sont posterieures a 1950 et anterieures a la date
+du jour), et la detection de regressions (comparaison du nombre d'enregistrements par table avec
+l'import precedent, alerte si baisse superieure a 2%).
+
+
+5. Proposition de schema SQLite
+5.1 Principes de design
+Le schema SQLite est concu pour maximiser la simplicite d'acces aux donnees tout en preservant la
+fidelite aux sources. Les principes directeurs sont les suivants. Premierement, chaque fichier BDPM
+correspond exactement a une table SQLite, sans normalisation supplementaire : la table cis_specialites
+reflete CIS_bdpm.txt, la table cis_presentations reflete CIS_CIP_bdpm.txt, etc. Cela facilite la mise a
+jour incrementale et le diagnostic. Deuxiemement, les colonnes utilisent des types SQLite natifs
+(INTEGER, TEXT, REAL) avec des CHECK constraints pour les enumerations. Troisiemement, les cles
+etrangeres sont declarees mais avec PRAGMA foreign_keys = OFF par defaut pour ne pas bloquer
+l'insertion des references orphelines. Quatriemement, un prefixe _raw est utilise pour les colonnes
+stockant la valeur originale avant normalisation (ex : date_amm_raw en TEXT vs date_amm en TEXT au
+format ISO). Cinquiemement, chaque table possede une colonne _import_id referencant la table
+import_log pour la tracabilite.
+
+
+5.2 Schema detaille
+
+       Table                          Colonnes cles                       Type PK      Index recommandes
+
+                     id, timestamp, file_name, sha256, rows_read,
+                                                                          INTEGER
+import_log           rows_inserted, rows_updated, status,                              timestamp, file_name
+                                                                            AUTO
+                     duration_ms
+
+                     code_cis (PK), denomination, forme_pharma,
+                                                                                       denomination,
+                     voies_admin, statut_amm, type_proc,
+                                                                         TEXT (code    statut_amm, etat_com
+cis_specialites      etat_commercialisation, date_amm, statut_bdm,
+                                                                            CIS)       mercialisation,
+                     num_auto_euro, titulaires,
+                                                                                       date_amm
+                     surveillance_renforcee, _import_id
+
+                     code_cis (FK), code_cip7, libelle, statut_admin,
+                     etat_commercialisation, date_decla, code_cip13,                   code_cis, code_cip13,
+                                                                         COMPOSITE
+cis_presentations    agrement, taux_remboursement, prix_ht,                            prix_ht,
+                                                                          (cis+cip7)
+                     prix_ttc, honoraires, indications_remboursement,                  etat_commercialisation
+                     _import_id
+
+                     code_cis (FK), designation, code_substance,
+                                                                                       code_cis,
+cis_compositions     denom_substance, dosage, ref_dosage, nature         ROWID AUTO
+                                                                                       code_substance, nature
+                     (SA/FT), num_liaison_sa_ft, _import_id
+
+                     code_cis (FK), code_dossier_has (FK), motif_eval,                 code_cis,
+cis_has_smr          date_avis (ISO), valeur_smr, libelle_smr,           ROWID AUTO    code_dossier_has,
+                     _import_id                                                        date_avis
+
+                     code_cis (FK), code_dossier_has (FK), motif_eval,                 code_cis,
+cis_has_asmr         date_avis (ISO), valeur_asmr, libelle_asmr,         ROWID AUTO    code_dossier_has,
+                     _import_id                                                        date_avis
+has_liens_ct            code_dossier_has (PK), lien_url, _import_id               TEXT           (PK suffit)
+
+                        id_groupe, libelle_groupe, code_cis (FK),                                code_cis, id_groupe,
+cis_generiques                                                                 ROWID AUTO
+                        type_generique (0/1/2/4), num_tri, _import_id                            type_generique
+
+cis_conditions_pres
+                        code_cis (FK), condition, _import_id                   ROWID AUTO        code_cis
+cription
+
+                        code_cis (FK), code_cip13, code_statut (1-4),                            code_cis, code_cip13,
+cis_disponibilite       libelle_statut, date_debut, date_maj,                  ROWID AUTO        code_statut,
+                        date_remise, lien_ansm, _import_id                                       date_debut
+
+                        code_cis (PK), code_atc, denomination,                 TEXT (code
+cis_mitm                                                                                         code_cis, code_atc
+                        lien_bdpm, _import_id                                     CIS)
+
+cis_info_important      code_cis (FK), date_debut (ISO), date_fin (ISO),                         code_cis, date_debut,
+                                                                               ROWID AUTO
+es                      texte, url (extraite), _import_id                                        date_fin
+
+         Tableau 6 : Schema SQLite propose avec colonnes cles, types de cle primaire et index recommandes.
+
+
+
+
+5.3 Types SQLite et contraintes
+SQLite etant sans typage fort natif, les contraintes sont essentielles pour garantir la qualite. Chaque
+colonne de type enumeration recoit une CHECK constraint : CHECK (nature IN ('SA', 'FT')) pour
+cis_compositions, CHECK (type_generique IN (0, 1, 2, 4)) pour cis_generiques, CHECK (code_statut IN
+(1, 2, 3, 4)) pour cis_disponibilite, CHECK (surveillance_renforcee IN ('Oui', 'Non')) pour cis_specialites.
+Les colonnes de prix sont de type REAL, les dates sont de type TEXT au format ISO 8601 (YYYY-MM-DD),
+et les codes CIS/CIP sont de type TEXT (pas INTEGER, car ce sont des identifiants avec zero-padding
+potentiel). Le PRAGMA journal_mode = WAL est recommande pour permettre des lectures
+concurrentes pendant l'import.
+
+
+6. Architecture de pipeline pour un developpement Rust
+6.1 Vue d'ensemble de l'architecture
+L'architecture proposee se decompose en 5 crates Rust organises en pipeline sequentiel, chacun avec
+une responsabilite unique et une interface claire. Cette decomposition permet le developpement
+incremental, les tests unitaires isoles, et une compilation parallele. Le crate central (bdpm-core) definit
+les structures de donnees partagees et les traits, tandis que les crates peripheriques implementent les
+etapes du pipeline.
+
+
+     Crate                  Responsabilite                     Deps Rust             Entree                    Sortie
+
+                    Telechargement, gestion HTTP,      reqwest, tokio, sha2,     Config (URLs,         Fichiers bruts +
+ bdpm-fetch
+                    archivage, hash SHA-256            chrono                    encodages)            manifeste JSON
+
+                    Decodage, split tab, validation    encoding_rs, csv          Fichiers bruts +      Vec type par
+ bdpm-parse
+                    structurelle, normalisation        (TSV), serde              config encodage       fichier
+                 Checks semantiques,
+ bdpm-validat                                                                 Vec + referentiel      Vec + rapport de
+                 referentiels, enumerations,        bdpm-core (traits)
+ e                                                                            CIS                    validation
+                 coherence
+
+                 Insertion SQLite, transactions,    rusqlite, refinery                               Base SQLite +
+ bdpm-db                                                                      Vec
+                 schema migrations, index           (migrations)                                     import_log
+
+                 Structures de donnees, traits,     serde, strum (enums),                            Types partagees
+ bdpm-core                                                                    -
+                 types enums, configuration         thiserror                                        + Config struct
+
+                 Tableau 7 : Architecture en crates du projet Rust avec dependances et interfaces.
+
+
+
+
+6.2 Structure de donnees centrale (bdpm-core)
+Le crate bdpm-core definit un type fort pour chaque fichier BDPM, derivant Serialize/Deserialize pour
+la compatibilite avec divers formats de sortie. Les enumerations sont implementees via le crate strum
+pour la conversion depuis/vers les chaines source. Chaque structure inclut un champ _meta contenant
+l'import_id et un flag is_orphan pour les references orphelines. Les types de date utilisent
+chrono::NaiveDate avec un parseur dedie qui gere les deux formats (DD/MM/YYYY et YYYYMMDD). Les
+prix sont representes en f64 avec un wrapper Decimal (crate rust_decimal) pour eviter les problemes
+de precision en virgule flottante dans les calculs financiers.
+
+
+6.3 Gestion des encodages en Rust
+Le crate encoding_rs est la reference pour le decodage cp1252 et latin-1 en Rust. Il fournit un decodeur
+zero-copy qui produit directement du &str; UTF-8 valide. La strategie recommandee est de declarer
+l'encodage attendu dans la configuration statique de chaque fichier (hardcode, pas de detection
+dynamique), puis d'appeler le decodeur correspondant. Le decodage cp1252->UTF-8 est deterministe
+et sans perte, y compris pour les caracteres 0x80-0x9F qui sont mappes vers leurs equivalents Unicode.
+Le type encoding_rs::Encoding est une enum statique, ce qui signifie que l'encodage est resolu a la
+compilation, sans cout runtime.
+
+
+6.4 Integration SQLite : rusqlite
+Le crate rusqlite est le standard de facto pour SQLite en Rust. Il supporte les transactions, les prepared
+statements, le mode WAL, et les fonctions definies par l'utilisateur. Pour le schema BDPM, l'approche
+recommandee est d'utiliser le crate refinery pour les migrations de schema, ce qui permet de
+versionner les changements de structure de maniere reproductible. Chaque migration est un fichier
+SQL numerote (V1__initial_schema.sql, V2__add_fulltext_search.sql, etc.). Les insertions utilisent des
+transactions explicites avec un batch size de 1000 lignes pour equilibrer la memoire et la performance
+(SQLite peut inserer 50 000+ lignes/seconde en mode WAL avec des transactions batchees).
+
+
+6.5 Modele d'import incremental
+Le modele d'import incremental est le coeur operationnel du pipeline. Plutot que de reconstruire la
+base entiere a chaque mise a jour, le pipeline compare les nouvelles donnees avec l'etat existant et
+n'applique que les differences. Pour chaque table, le processus suit trois phases. La phase d'insertion
+ajoute les enregistrements dont la cle primaire est nouvelle. La phase de mise a jour compare le
+contenu hashé de chaque enregistrement existant et met a jour ceux dont le hash a change. La phase
+de suppression logique marque comme inactifs les enregistrements presents dans la base mais absents
+du nouveau fichier (soft delete via colonne is_active). Ce modele preserve l'historique tout en
+maintenant la base a jour. Il est particulierement important pour les fichiers HAS (SMR/ASMR) qui
+contiennent des references a des medicaments retires du repertoire CIS_bdpm.txt.
+
+
+7. Priorites de mise en oeuvre
+L'implementation doit suivre un ordre precis qui minimise les risques et maximise la valeur delivree a
+chaque etape. Chaque phase produit un artefact utilisable independamment.
+
+
+                                                                                                            Duree
+       Phase                          Objectif                                Livrable
+                                                                                                           estimee
+
+                      bdpm-core : types, enums, config, traits.   Binaire CLI qui telecharge et
+   1. Foundation      bdpm-fetch : telechargement + hash +        archive les 11 fichiers avec           1-2 semaines
+                      archivage                                   manifeste JSON
+
+                      bdpm-parse : decodage
+                                                                  Binaire CLI qui parse les 11
+                      cp1252/latin-1/utf-8, split TSV,
+   2. Parsing                                                     fichiers et exporte en JSON/CSV        2-3 semaines
+                      normalisation
+                                                                  valide
+                      dates/nombres/apostrophes
+
+                                                                  Base SQLite complete et
+                      bdpm-db : schema, migrations, insertion
+   3. Base SQLite                                                 requetable avec les 11 tables +        1-2 semaines
+                      batch, import_log, index
+                                                                  logs d'import
+
+                      bdpm-validate : checks referentiels,
+                                                                  Rapport de validation HTML/CLI
+   4. Validation      enumerations, coherence temporelle,                                                1-2 semaines
+                                                                  apres chaque import
+                      regression
+
+                                                                  Pipeline complet qui met a jour
+   5.                 Import incremental : diff hash, upsert,
+                                                                  la base sans reconstruction            2 semaines
+   Incremental        soft delete, notifications
+                                                                  totale
+
+                      Couche REST/GraphQL au-dessus de            API HTTP documentee
+   6. API (futur)     SQLite : actix-web ou axum, avec            (OpenAPI) avec recherche,              3-4 semaines
+                      recherche full-text                         filtrage, pagination
+
+                    Tableau 8 : Phases de mise en oeuvre avec objectifs, livrables et durees estimees.
+
+
+L'ordre est critique : la phase 1 (fetch) doit etre fonctionnelle avant la phase 2 (parse), qui doit etre
+validee avant la phase 3 (SQLite). Les phases 4 et 5 peuvent etre partiellement paralleleisees, mais la
+phase 5 depend de la phase 3. La phase 6 (API) est le but final mais doit attendre que la base soit stable
+et complete. Un jalon important est la fin de la phase 3, qui marque la disponibilite d'une base SQLite
+exploitable par des outils tiers (DB Browser for SQLite, scripts Python, etc.).
+8. Points a valider par des tests ou observations
+supplementaires
+Plusieurs hypotheses de cette etude dependent de points incertains qui necessitent une validation
+empirique avant l'implementation. Les points suivants sont classes par ordre de priorite.
+
+
+8.1 Stabilite du schema dans le temps
+L'hypothese la plus critique est que le schema des fichiers (nombre de colonnes, ordre, signification)
+reste stable d'un mois a l'autre. La documentation PDF de format existe en version 4, ce qui suggere
+que des evolutions ont eu lieu par le passe, mais aucun changelog n'est disponible. Il est imperatif de :
+(a) archiver les fichiers de plusieurs mois consecutifs et comparer les structures, (b) surveiller la page
+de telechargement pour detecter l'ajout ou la suppression de fichiers, (c) prevoir un mecanisme de
+schema_version dans la configuration du parser pour gerer les evolutions futures.
+
+
+8.2 Comportement du serveur sous charge
+Le serveur BDPM ne fournit pas de documentation sur ses limites de debit. Des tests de charge
+respectueux (telechargement d'un fichier a la fois, intervalle de 5 secondes entre les requetes, pas de
+requetes paralleles) sont necessaires pour determiner : (a) si le serveur applique un rate-limiting, (b) si
+les telechargements simultanes de tous les fichiers sont possibles, (c) quel User-Agent et quel Referer
+sont acceptables. En l'absence d'informations officielles, il est recommande d'utiliser un User-Agent
+explicite (ex : BDPM-Importer/1.0) et de respecter un intervalle minimum de 2 secondes entre les
+requetes.
+
+
+8.3 Site de recette ANSM
+Un site de recette (staging) existe a l'adresse rec-bdm.ansm.integra.fr. Ce site pourrait prefigurer les
+changements de schema avant leur deploiement en production. Il serait judicieux de verifier
+regulierement si ce site publie des fichiers au format different, ou si des fichiers supplementaires y sont
+disponibles. Cependant, ce site n'est pas officiellement documente comme public, et son utilisation
+doit etre circonscrite a l'observation, sans telechargement automatique.
+
+
+8.4 Existence du dump MySQL
+Le projet betagouv/infomedicament reference l'utilisation d'un dump MySQL de la BDPM (fichier .sql +
+dossier d'images), qui serait un canal de distribution alternatif aux fichiers TXT. L'existence et
+l'accessibilite de ce dump doivent etre verifiees : s'il est publiquement disponible et plus complet que
+les fichiers TXT (par exemple, s'il inclut les codes ATC qui manquent dans les fichiers TXT), il pourrait
+constituer une source complementaire ou alternative. A ce jour, aucune URL publique n'a ete identifiee
+pour ce dump.
+
+
+8.5 Comportement des lignes vides dans CIS_CPD
+Les 9 lignes vides de CIS_CPD_bdpm.txt (sequences \r\r\n) sont elles une anomalie ponctuelle ou un
+phenomene recurrent ? Si le probleme reaparait de maniere reguliere, il pourrait indiquer un bug dans
+le generateur de fichiers cote ANSM. La surveillance de ce fichier sur plusieurs mois permettrait de
+confirmer ou d'infirmer cette hypothese, et d'adapter la strategie de filtrage en consequence.
+
+
+8.6 Verifier l'absence de crate Rust existante
+La recherche menee dans le cadre de cette etude n'a identifie aucune crate Rust dediee au parsing
+BDPM sur crates.io ou GitHub. Cette constatation doit etre reconfirmee au moment du lancement du
+projet, car l'ecosysteme Rust evolue rapidement. Le nom de crate recommande est bdpm ou
+bdpm-parser, et il est conseille de le reserver des le debut du projet.
+
+
+9. Risques techniques et angles morts
+9.1 Risques identifies
+  • Changement de schema sans notification : L'absence de changelog et de versionnement signifie
+     qu'un changement de format (ajout de colonne, modification d'enumeration, changement
+     d'encodage) ne sera detecte qu'au moment du parsing. Mitigation : le parser doit journaliser tout
+     ecart par rapport au schema attendu et echouer gracieusement plutot que silencieusement.
+  • Disparition ou deplacement d'un fichier : Si un fichier est renomme ou supprime, le pipeline doit
+     le detecter (HTTP 404) et alerter, pas ignorer silencieusement. Mitigation : le fetcher doit verifier
+     le code HTTP et lever une alerte pour tout statut different de 200.
+  • Encodage changeant : Si l'ANSM migre un fichier de cp1252 vers UTF-8 sans announcement, le
+     parser echouera sur les caracteres specifiques a cp1252. Mitigation : implementer un detecteur
+     d'encodage de secours (chardet ou encoding_rs detective) qui s'active si le decodage par defaut
+     produit des caracteres de substitution (U+FFFD).
+  • Rate-limiting ou blocage IP : Le serveur peut bloquer les requetes trop frequentes. Mitigation :
+     respecter un intervalle minimum entre les requetes, utiliser un User-Agent explicite, et
+     implementer un backoff exponentiel en cas de code HTTP 429 ou 503.
+  • Perte de donnees historiques : Les medicaments retires du repertoire CIS_bdpm.txt
+     disparaissent des imports futurs. Si le pipeline ecrase la base a chaque import au lieu de faire un
+     import incremental avec soft delete, les donnees historiques sont perdues. Mitigation :
+     implementer le modele incremental des la phase 5, et archiver les fichiers bruts.
+
+
+9.2 Angles morts
+Plusieurs zones d'ombre persistent malgre l'analyse approfondie. Premierement, les donnees de
+l'ANSM sont presumees completes pour le perimetre declare (medicaments commercialises ou retires
+depuis moins de 2 ans), mais il n'existe aucun moyen de verifier cette completude de maniere
+independante. Deuxiemement, la frequence exacte de mise a jour de chaque fichier n'est pas
+documentee officiellement (seulement la cadence mensuelle globale), et les variations observees
+pourraient etre accidentelles plutot que deliberees. Troisiemement, le canal MySQL identifie par
+infomedicament reste opaque : on ne sait pas s'il contient des donnees supplementaires (codes ATC,
+images, textes de RCP) ni s'il est accessible au public. Quatriemement, l'impact de la refonte potentielle
+du site BDPM (migration vers un autre CMS, changement d'URL) est impossible a anticiper, mais le
+risque existe a moyen terme vu l'obsolescence des technologies utilisees.
+
+
+10. Synthese et recommandations finales
+L'etude de faisabilite confirme que la construction d'une base SQLite fiable et complete a partir des
+fichiers BDPM est entierement realisable. Les donnees sont structurellement saines (zero ligne mal
+formee, tabulations uniformes, enumerations conformes), mais elles presentent des subtilites
+d'encodage (trois normes cohabitent, cp1252 massif), de format (deux formats de date, virgule
+decimale, HTML embarque) et de coherence referentielle (orphelins HAS et GENER significatifs) qui
+doivent etre traitees explicitement dans le code.
+
+Le projet Rust est en terrain vierge : aucune crate existante ne couvre le parsing BDPM, et aucune base
+SQLite pre-construite n'est disponible publiquement. C'est donc une opportunite de creer un outil de
+reference pour la communaute. L'architecture en 5 crates (core, fetch, parse, validate, db) offre la
+modularite necessaire pour un developpement incremental et teste. Les decisions critiques a prendre
+des le lancement sont : le choix du crate HTTP (reqwest avec runtime tokio), le choix du crate SQLite
+(rusqlite avec refinery pour les migrations), et la strategie d'encodage (hardcode par fichier, pas de
+detection dynamique).
+
+Les trois recommandations les plus importantes pour lancer proprement le projet sont, premierement,
+commencer par implementer le fetcher avec archivage horodate et hash SHA-256, car cela permet
+d'accumuler des archives de donnees reelles pour tester le parser. Deuxiemement, implementer le
+parser fichier par fichier en commencant par CIS_bdpm.txt (le plus simple et le plus central), puis
+CIS_CIP_bdpm.txt (le seul UTF-8 parmi les fichiers cp1252), puis les fichiers HAS (dates YYYYMMDD), et
+enfin les cas particuliers (CIS_CPD avec ses lignes vides, CIS_InfoImportantes avec son HTML,
+CIS_CIP_Dispo_Spec en latin-1). Troisiemement, ne pas attendre d'avoir un parser parfait pour
+construire la base SQLite : une base avec des colonnes _raw contenant les valeurs originales permet de
+valider les requetes tout en affinant le parsing iterativement.
+

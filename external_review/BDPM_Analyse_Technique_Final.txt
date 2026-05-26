@@ -1,0 +1,934 @@
+AN ALY SE TECH N I Q U E
+
+
+BDPM
+Base de Donnees
+Publique
+des Medicaments
+Methodologie de creation d'une base SQLite
+pour un futur projet Rust
+
+
+
+
+      R ESUME
+      Analyse approfondie de 11 fichiers TSV de la BDPM (26,3 Mo, 144 829 enregistrements),
+      identification de 15 problemes d'encodage et de formatage, conception d'un schema
+      SQLite normalise, et definition d'une strategie de monitoring proactif pour maintenir la
+      base a jour de maniere fiable et respectueuse du serveur.
+
+
+
+
+SO U R C E                                                                         DATE D'A N A LY SE
+base-donnees-publique.medicaments.gouv.fr                                              26 mai 2026
+
+
+
+
+                                                                      2026
+I N STI TU TI O N S                                                                        L I C EN C E
+ANSM / HAS / CNAMTS                                                               Licence Ouverte
+                             Table des Matieres
+
+1. Introduction et Contexte Institutionnel                                                                 3
+
+2. Inventaire des Fichiers BDPM                                                                            3
+
+3. Analyse des Problemes Critiques                                                                         4
+
+   3.1 Encodages mixtes (CRITIQUE) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+
+   3.2 Apostrophes courbes 0x92 dans les fichiers HAS (CRITIQUE) . . . . . . . . . . . . . . . . . 5
+
+   3.3 Formats de date incoherents (CRITIQUE) . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+
+   3.4 Fins de ligne incoherentes (CRITIQUE) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+
+4. Problemes Moderes et Mineurs                                                                            7
+
+   4.1 Problemes moderes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+
+   4.2 Problemes mineurs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+
+5. Analyse des Relations Inter-Fichiers                                                                    8
+
+   5.1 Code CIS comme cle primaire . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+
+   5.2 Codes CT et relations HAS . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+
+   5.3 Codes CIP et presentations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+
+   5.4 Codes substance et compositions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+
+6. Schema SQLite Propose                                                                                   9
+
+   6.1 Table principale : specialites . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+
+   6.2 Table des presentations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+
+   6.3 Table des compositions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+
+   6.4 Tables HAS (SMR, ASMR, liens CT) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+
+   6.5 Tables complementaires . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+
+   6.6 Table de metadonnees pour le suivi . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+
+7. Strategie de Monitoring Proactif                                                                      12
+
+   7.1 Couche 1 : Hash SHA-256 des fichiers (primaire) . . . . . . . . . . . . . . . . . . . . . . . 12
+
+   7.2 Couche 2 : API data.gouv.fr (secondaire) . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+
+   7.3 Couche 3 : Scraping de la page telechargement (secours) . . . . . . . . . . . . . . . . . . . 13
+   7.4 Strategie de sondage adaptatif . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+
+   7.5 Regles de politesse et limitation de debit . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+
+8. Architecture du Futur Projet Rust                                                                     14
+
+   8.1 Crates Rust recommandees . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+
+   8.2 Structure des modules . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+
+   8.3 Pipeline de traitement . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+
+   8.4 Sous-commandes CLI proposees . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+
+9. Analyse des En-Tetes HTTP et du Serveur                                                               16
+
+10. API et Outils Existantes                                                                             17
+
+11. Recommandations Finales                                                                              17
+
+   11.1 Priorite 1 : Pipeline d'import robuste . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+
+   11.2 Priorite 2 : Base SQLite avec schema normalise . . . . . . . . . . . . . . . . . . . . . . . 18
+
+   11.3 Priorite 3 : Monitoring proactif avec sondage adaptatif . . . . . . . . . . . . . . . . . . . . 18
+
+   11.4 Priorite 4 : API locale et export . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+1. Introduction et Contexte Institutionnel
+La Base de Donnees Publique des Medicaments (BDPM) constitue la reference officielle en France pour les
+informations sur les medicaments commercialises ou recemment retires du marche. Mandatee par l'article L.
+161-40-1 du Code de la Securite Sociale (loi n 2011-2012 du 29/12/2011), elle a ete lancee le 1er octobre 2013 et
+est publiee sous la Licence Ouverte, permettant une libre reproduction, redistribution et exploitation avec
+attribution. Ce rapport presente une analyse technique approfondie des fichiers de donnees publies par la BDPM,
+dans le but de concevoir une base de donnees SQLite propre, complete et facilement accessible, preparant le
+terrain pour un futur projet Rust.
+
+La BDPM est geree conjointement par trois institutions. L'ANSM (Agence nationale de securite du medicament et
+des produits de sante) en est l'operateur principal, responsable des donnees d'Autorisation de Mise sur le Marche
+(AMM), des alertes de securite et des ruptures d'approvisionnement. La HAS (Haute Autorite de Sante) fournit les
+evaluations du Service Medical Rendu (SMR) et de l'Amelioration du Service Medical Rendu (ASMR), ainsi que
+les avis de la Commission de la Transparence. Enfin, la CNAMTS/UNCAM (Caisse Nationale de l'Assurance
+Maladie) fournit les donnees de tarif et de remboursement.
+
+Les fichiers sont disponibles au telechargement sur le site officiel de la BDPM. Notre analyse a identifie 11
+fichiers de donnees au format TSV (tab-separated values), totalisant environ 26,3 Mo et 144 829 enregistrements.
+Ces fichiers presentent des problemes significatifs d'encodage, de formatage et de coherence qui rendent
+necessaire une approche methodique et robuste pour leur transformation en base de donnees exploitable. Ce
+document detaille l'ensemble de ces problemes, propose un schema SQLite optimise, et definit une strategie de
+monitoring proactif pour maintenir la base a jour de maniere fiable et respectueuse du serveur.
+
+
+
+2. Inventaire des Fichiers BDPM
+L'analyse a identifie 11 fichiers de donnees plus un PDF de specification du format. Le pattern d'URL historique
+/telechargement?fich=XXX ne fonctionne plus et renvoie la page d'accueil HTML du site. Les URL
+correctes sont desormais /download/file/XXX pour 10 des 11 fichiers, et /download/XXX uniquement
+pour CIS_InfoImportantes.txt. Le fichier historiquement nomme CIS_HAS_AMM_bdpm.txt a ete renomme
+CIS_HAS_ASMR_bdpm.txt (ASMR et non AMM). Ces decouvertes sont essentielles pour toute implementation
+automatee.
+
+
+                                                  Lign   Co    Taille   Encoda     Fins      Mise a
+                    Fichier          Contenu
+                                                   es    ls    (Ko)       ge       ligne      jour
+
+                                     Specialite   15                                        28/04/202
+              CIS_bdpm.txt                               12   3 091     Latin-1   CRLF
+                                     s            848                                       6
+
+                                     Presentati   20                                        25/05/202
+              CIS_CIP_bdpm.txt                           13   4 054     UTF-8     LF
+                                     ons          903                                       6
+
+              CIS_COMPO_bdpm         Composit     32                                        28/04/202
+                                                         8    2 670     Latin-1   CRLF
+              .txt                   ions         389                                       6
+              CIS_HAS_SMR_bd         Avis         15                          Win-125               28/04/202
+                                                           6      4 388                   CRLF
+              pm.txt                 SMR          257                         2                     6
+
+              CIS_HAS_ASMR_b         Avis                                     Win-125               28/04/202
+                                                  9 906    6      4 375                   CRLF
+              dpm.txt                ASMR                                     2                     6
+
+              HAS_LiensPageCT_                    10                                                28/04/202
+                                     Liens CT              2      499         ASCII       CRLF
+              bdpm.txt                            342                                               6
+
+              CIS_GENER_bdpm.        Generiqu     10                                                28/04/202
+                                                           5      1 188       Latin-1     CRLF
+              txt                    es           704                                               6
+
+                                     Condition    28                                                28/04/202
+              CIS_CPD_bdpm.txt                             2      1 283       Latin-1     Mixte
+                                     s            154                                               6
+
+              CIS_CIP_Dispo_Spe                                                                     19/05/202
+                                     Ruptures     766      8      165         Latin-1     CRLF
+              c.txt                                                                                 6
+
+                                                                                                    09/03/202
+              CIS_MITM.txt           MITM         7 711    4      1 110       Latin-1     CRLF
+                                                                                                    6
+
+              CIS_InfoImportantes    Info.        10                                                Dynamiq
+                                                           4      4 121       UTF-8       LF
+              .txt                   secu.        189                                               ue
+
+                    Tableau 1 : Inventaire complet des fichiers de donnees BDPM (analyse du 26/05/2026)
+
+Il est important de noter que CIS_InfoImportantes.txt est genere dynamiquement a chaque telechargement, comme
+en temoigne l'en-tete HTTP Content-Disposition qui inclut un horodatage dans le nom du fichier (par exemple
+CIS_InfoImportantes_20260526110730_bdpm.txt). Ce comportement est confirme par le type
+MIME        application/force-download                      qui         lui   est       attribue,    contrairement   au
+application/octet-stream des autres fichiers. Cette particularite a des implications majeures pour la
+strategie de monitoring.
+
+
+
+3. Analyse des Problemes Critiques
+L'analyse approfondie des 11 fichiers a revele 15 problemes distincts, classes en trois niveaux de gravite : 4
+critiques, 6 moderes et 5 mineurs. Cette section detaille chacun d'entre eux avec les recommandations de
+resolution associees, essentielles pour toute implementation robuste en Rust.
+
+
+3.1 Encodages mixtes (CRITIQUE)
+Le probleme le plus severe est l'incoherence des encodages entre les fichiers. Sur les 11 fichiers, 9 utilisent
+Latin-1/Windows-1252 tandis que seulement 2 (CIS_CIP_bdpm.txt et CIS_InfoImportantes.txt) utilisent UTF-8.
+Tenter de lire les fichiers avec un encodage UTF-8 provoque une erreur de decodage des le premier caractere
+accentue rencontre. La consequence directe est qu'un parseur naif echouera silencieusement ou avec une exception
+sur la majorite des fichiers. Ce probleme est d'autant plus insidieux que les caracteres ASCII de base (chiffres,
+lettres non accentuees) sont identiques dans les trois encodages, ce qui signifie que les erreurs n'apparaissent que
+sur les champs contenant des caracteres accentues ou speciaux, rendant les tests superficiels trompeurs.
+                                                                      Confianc
+                  Fichier                   Encodage detecte                                        Detail
+                                                                         e
+
+          CIS_bdpm.txt                  ISO-8859-1 (Latin-1)          0.730         Octet 0xe9 pos 58
+
+          CIS_CIP_bdpm.txt              UTF-8                         0.990         Decode proprement
+
+          CIS_COMPO_bdpm.txt            ISO-8859-1 (Latin-1)          0.730         Octet 0xe9 pos 16
+
+          CIS_HAS_SMR_bdpm.tx
+                                        Windows-1252                  0.723         22 253 octets 0x92
+          t
+
+          CIS_HAS_ASMR_bdpm.t
+                                        Windows-1252                  0.727         29 704 octets 0x92
+          xt
+
+          HAS_LiensPageCT_bdpm
+                                        ASCII pur                     1.000         Pas d'accents
+          .txt
+
+          CIS_GENER_bdpm.txt            Windows-1252/Latin-1          0.730         Octet 0xe9 pos 45
+
+          CIS_CPD_bdpm.txt              ISO-8859-1 (Latin-1)          0.730         Octet 0xe9 pos 10
+
+          CIS_CIP_Dispo_Spec.txt        ISO-8859-1 (Latin-1)          0.730         Octet 0xe0 pos 207
+
+          CIS_MITM.txt                  ISO-8859-1 (Latin-1)          0.730         Octet 0xe9 pos 80
+
+          CIS_InfoImportantes.txt       UTF-8                         0.990         Decode proprement
+
+                            Tableau 2 : Encodage detecte par fichier (via chardet et inspection manuelle)
+
+Recommandation : Toujours decoder en Windows-1252 en premiere approche. Ce dernier est un sur-ensemble de
+Latin-1 qui gere correctement les caracteres specifiques Windows (comme l'apostrophe courbe 0x92, le symbole
+euro, les guillemets courbes). Apres decodage, normaliser en UTF-8 pour le stockage SQLite. En Rust, la crate
+encoding_rs permet de decoder Windows-1252 vers UTF-8 de maniere efficace et sans perte.
+
+
+3.2 Apostrophes courbes 0x92 dans les fichiers HAS (CRITIQUE)
+Les fichiers CIS_HAS_SMR_bdpm.txt et CIS_HAS_ASMR_bdpm.txt contiennent respectivement 22 253 et 29
+704 occurrences de l'octet 0x92, qui correspond a l'apostrophe courbe droite (right single quotation mark) dans
+l'encodage Windows-1252. En Latin-1, cet octet est un caractere de controle non defini, et en UTF-8 il est
+invalide. Si ces fichiers sont decodees en Latin-1 ou UTF-8, ces caracteres seront remplaces par des signes
+d'interrogation ou des caracteres de substitution (U+FFFD), corrompant le texte des avis de la HAS qui represente
+une part essentielle de la base. Par exemple, "l'indication" apparait comme "l'indication" en Windows-1252 mais
+sera corrompu si le decodeur n'est pas correct. Cela affecte potentiellement chaque ligne de ces deux fichiers,
+puisque les motifs d'evaluation contiennent systematiquement du texte francais avec des apostrophes.
+
+Recommandation : Decoder systematiquement en Windows-1252, puis remplacer le caractere U+2019 (right
+single quotation mark) par l'apostrophe standard U+0027 lors de l'import. En Rust, cela se traduit par un
+str::replace("\u{2019}", "'") apres decodage. Cette etape de normalisation doit etre appliquee a
+tous les champs textuels, car les apostrophes courbes peuvent aussi apparaitre dans d'autres champs que le motif
+d'avis.
+3.3 Formats de date incoherents (CRITIQUE)
+Trois formats de date differents sont utilises a travers les fichiers, sans indication explicite du format dans les
+donnees elles-memes. Cette incoherence est source de bugs subtils lors de l'importation et de l'interrogation de la
+base.     Les    dates   DD/MM/YYYY           sont      utilisees    dans     CIS_bdpm.txt,   CIS_CIP_bdpm.txt      et
+CIS_CIP_Dispo_Spec.txt. Les dates YYYYMMDD sans separateur apparaissent dans CIS_HAS_SMR_bdpm.txt
+et CIS_HAS_ASMR_bdpm.txt. Enfin, le format ISO 8601 YYYY-MM-DD est utilise uniquement dans
+CIS_InfoImportantes.txt. Cette heterogeneite rend les comparaisons de dates entre fichiers impossibles sans
+normalisation prealable, et toute requete SQL impliquant des dates (par exemple, trouver les medicaments dont
+l'avis SMR est anterieur a l'AMM) echouera sans conversion prealable.
+
+
+           Format                                    Fichiers concernes                            Exemple
+
+        DD/MM/YYYY         CIS_bdpm.txt, CIS_CIP_bdpm.txt, CIS_CIP_Dispo_Spec.txt             28/04/2026
+
+        YYYYMMDD           CIS_HAS_SMR_bdpm.txt, CIS_HAS_ASMR_bdpm.txt                        20260428
+
+        YYYY-MM-DD         CIS_InfoImportantes.txt                                            2026-04-28
+
+                                     Tableau 3 : Formats de date et fichiers concernes
+
+Recommandation : Normaliser toutes les dates au format ISO 8601 (YYYY-MM-DD) lors de l'import dans
+SQLite, en utilisant le type TEXT avec le format standardise. En Rust, la crate chrono avec
+NaiveDate::parse_from_str permet de gerer les trois formats avec des patternes distincts. Stocker les
+dates au format ISO 8601 permet en outre d'utiliser la fonction date() de SQLite pour les comparaisons et les
+calculs d'intervalle.
+
+
+3.4 Fins de ligne incoherentes (CRITIQUE)
+Neuf fichiers utilisent les fins de ligne Windows CRLF (\r\n), tandis que deux fichiers (CIS_CIP_bdpm.txt et
+CIS_InfoImportantes.txt) utilisent les fins de ligne Unix LF (\n). Plus problematique encore, CIS_CPD_bdpm.txt
+presente des fins de ligne mixtes avec 6 caracteres CR isoles creant 3 lignes vides fantomes avec des sequences
+\r\r\n. Ces lignes vides apparaissent aux alentours des lignes 27672-27677 et correspondent a des CIS codes
+66371262, 66446220 et 68822785 dont le contenu semble tronque par le double CR. Un parseur naif qui split sur
+\n generera des lignes vides ou des lignes incompletes pour ce fichier. Ce bug de generation est probablement du a
+un probleme dans le pipeline d'export de l'ANSM.
+
+Recommandation : Supprimer systematiquement tous les caracteres \r lors de la lecture, puis filtrer les lignes
+vides resultantes. En Rust, cela se fait avec line.replace("\r", "") ou en utilisant str::lines() qui
+gere nativement les fins de ligne mixtes. Ajouter une etape de validation qui detecte et journalise les lignes avec un
+nombre de colonnes inattendu, permettant d'identifier tout nouveau probleme similaire dans les futures mises a
+jour.
+4. Problemes Moderes et Mineurs
+4.1 Problemes moderes
+
+       Probleme                                     Detail                                        Resolution
+
+                        CIS_bdpm.txt col 10 (Titulaire) : 15 847/15 848 lignes
+ Espaces en debut de                                                                 Strip systematique des espaces en
+                        avec espace en debut. Col 2 (Forme pharma.) : 1 134
+ champ                                                                               debut/fin de champ.
+                        lignes.
+
+                        CIS_CIP_bdpm.txt col 8 : "100 %" vs "100%" (avec ou
+ Format pourcentage                                                                  Normaliser en supprimant l'espace
+                        sans espace avant %). 10 valeurs uniques melangeant les
+ incoherent                                                                          avant le %.
+                        deux formats.
+
+                        CIS_CIP_Dispo_Spec.txt col 3 : "Remise a disposition"        Normaliser en majuscule initiale ou
+ Incoherence de casse
+                        (R majuscule) vs "remise a disposition" (r minuscule).       tout minuscule.
+
+ Lignes vides dans      3 lignes vides causees par \r\r\n aux lignes 27673, 27675,   Filtrer les lignes vides et journaliser
+ CIS_CPD                27677.                                                       les anomalies.
+
+                        CIS_CIP_Dispo_Spec.txt : 17 lignes exactement                Dedupliquer lors de l'import
+ Lignes dupliquees
+                        dupliquees (meme CIS + CIP + statut).                        (conserver la premiere occurrence).
+
+ HTML dans les          CIS_InfoImportantes.txt col 3 : balises <a> avec &ecirc;.    Extraire texte et URL separement via
+ donnees                CIS_CIP_bdpm.txt col 12 : balises <br>.                      un parseur HTML leger.
+
+                                         Tableau 4 : Problemes moderes identifies
+
+
+4.2 Problemes mineurs
+
+       Probleme                                     Detail                                        Resolution
+
+                                                                                     Creer une table de reference des CIS
+                        2 806 orphelins dans SMR, 1 567 dans ASMR, 2 503 dans
+ Codes CIS orphelins                                                                 archives ou utiliser des LEFT JOIN
+                        GENER. Probablement des specialites archivees.
+                                                                                     avec NULL.
+
+ Absence                Aucun en-tete HTTP conditionnel. Pas de telechargement       Telecharger les fichiers complets et
+ ETag/Last-Modified     incrementiel possible.                                       comparer par hash SHA-256.
+
+ Nom dynamique          Le Content-Disposition inclut un timestamp dans le nom       Ignorer le timestamp dans le nom lors
+ InfoImportantes        du fichier.                                                  de la sauvegarde locale.
+
+ URLs HTTP dans
+                        Col 3 utilise http:// au lieu de https://                    Remplacer par l'equivalent https://.
+ CIS_MITM.txt
+
+ Absence d'en-tete de                                                                Appliquer les noms de colonnes
+                        Aucun fichier ne contient de ligne d'en-tete.
+ colonnes                                                                            depuis la specification BDPM.
+
+                                         Tableau 5 : Problemes mineurs identifies
+5. Analyse des Relations Inter-Fichiers
+5.1 Code CIS comme cle primaire
+Le Code CIS (identifiant de specialite, 8 chiffres) constitue la cle primaire du systeme et relie l'ensemble des
+fichiers entre eux. CIS_bdpm.txt est le fichier maitre contenant 15 848 codes CIS uniques. Tous les autres fichiers
+referencent ce code, mais avec des niveaux variables d'integrite referentielle. L'analyse croisee revele que
+CIS_COMPO_bdpm.txt et CIS_MITM.txt ont une integrite referentielle parfaite (0 orphelin), tandis que
+CIS_HAS_SMR_bdpm.txt presente le plus grand nombre d'orphelins (2 806 codes CIS presents dans le fichier
+SMR mais absents du fichier maitre). Ces orphelins representent probablement des specialites dont l'autorisation a
+ete revoquee ou archivee mais qui conservent des evaluations historiques. La licence BDPM stipule d'ailleurs
+explicitement que les evaluations historiques doivent etre conservees.
+
+
+                   Fichier                CIS uniques         Dans maitre         Orphelins       Absents du fichier
+
+               CIS_CIP_bdpm.txt               14 573              14 569               4                 1 279
+
+            CIS_COMPO_bdpm.txt                15 846              15 846               0                      2
+
+           CIS_HAS_SMR_bdpm.txt                9 014              6 208             2 806                9 640
+
+           CIS_HAS_ASMR_bdpm.txt               6 172              4 605             1 567                11 243
+
+             CIS_GENER_bdpm.txt               10 628              8 125             2 503                7 723
+
+              CIS_CPD_bdpm.txt                12 493              12 492               1                 3 356
+
+            CIS_CIP_Dispo_Spec.txt              727                715                12                 15 133
+
+                CIS_MITM.txt                   7 711              7 711                0                 8 137
+
+            CIS_InfoImportantes.txt            4 208              3 243              965                 12 605
+
+                     Tableau 6 : Integrite referentielle croisee par rapport au fichier maitre CIS_bdpm.txt
+
+
+5.2 Codes CT et relations HAS
+Le code CT (Commission de la Transparence, format CT-NNNNN) relie les fichiers SMR, ASMR et
+LiensPageCT. L'analyse montre que le fichier des liens couvre un spectre plus large que les seules evaluations
+SMR/ASMR : 1 017 codes CT presents dans les evaluations SMR n'ont pas de lien correspondant, et 3 907 codes
+CT dans les liens ne correspondent a aucune evaluation SMR. Cela indique que le fichier LiensPageCT couvre
+l'ensemble des avis de la Commission de la Transparence, y compris ceux portant sur des questions de tarif ou de
+conditions de remboursement, et non uniquement les evaluations SMR/ASMR. Cette structure doit etre reflechie
+dans le schema SQLite par des relations many-to-many entre les codes CT et les differents types d'avis.
+
+
+5.3 Codes CIP et presentations
+CIS_CIP_bdpm.txt contient a la fois les codes CIP7 (colonne 1, 7 chiffres) et CIP13 (colonne 6, 13 chiffres). Tous
+les 20 903 codes CIP13 commencent par le prefixe "34009" (code national francais) et sont uniques par ligne. Les
+35 codes CIP13 presents dans CIS_CIP_Dispo_Spec.txt (ruptures de stock au niveau de la presentation) existent
+tous dans CIS_CIP_bdpm.txt, confirmant l'integrite referentielle des ruptures de stock au niveau presentation. La
+colonne CIP13 est vide a 95,4 % dans le fichier des ruptures, ce qui indique que la plupart des ruptures sont
+declarees au niveau de la specialite (CIS) plutot que de la presentation (CIP). Le mapping CIP7 vers CIP13 est
+bijectif dans les donnees actuelles, mais cette bijection n'est pas garantie par la specification.
+
+
+5.4 Codes substance et compositions
+CIS_COMPO_bdpm.txt contient 3 896 codes substance uniques au format 5 chiffres avec zero en prefixe (par
+exemple "05319"). Ces identifiants internes a la BDPM ne correspondent pas directement a des identifiants
+internationaux (comme les codes UNII ou les identifiants PubChem), mais le meme code substance peut apparaitre
+dans plusieurs specialites differentes, creant une relation many-to-many entre specialites et substances. Le champ
+"Nature du composant" (colonne 6) distingue les substances actives (SA) des fractions therapeutiques (FT), et le
+"Numero de liaison" (colonne 7) etablit le lien entre les substances actives et les fractions therapeutiques au sein
+d'une meme specialite. Cette structure hierarchique doit etre preservee dans le schema SQLite.
+
+
+
+6. Schema SQLite Propose
+Le schema suivant est concu pour maximiser l'integrite referentielle, la performance des requetes, et la facilite
+d'utilisation. Il normalise les dates en ISO 8601, les champs textuels en UTF-8, et preserve les relations
+hierarchiques entre les entites. Chaque table correspond a un fichier BDPM, avec des cles etrangeres vers la table
+principale des specialites. Le schema utilise les contraintes SQL standards (PRIMARY KEY, FOREIGN KEY,
+CHECK, UNIQUE) pour garantir la coherence des donnees a l'insertion. Les index sont places sur les colonnes les
+plus frequemment utilisees dans les requetes.
+
+
+6.1 Table principale : specialites
+   CREATE TABLE specialites (
+      code_cis TEXT PRIMARY KEY, -- 8 chiffres
+      denomination TEXT NOT NULL,
+      forme_pharmaceutique TEXT NOT NULL,
+      voies_administration TEXT, -- separees par "; "
+      statut_amm TEXT NOT NULL, -- enum: active/abrogee/archivee/retiree/suspendue
+      type_procedure TEXT NOT NULL,
+      etat_commercialisation TEXT NOT NULL, -- Commercialisee / Non commercialisee
+      date_amm TEXT NOT NULL, -- ISO 8601: YYYY-MM-DD
+      statut_bdm TEXT, -- Alerte / Warning disponibilite / NULL
+      numero_autorisation_europeenne TEXT,
+      titulaire TEXT, -- separees par "; "
+      surveillance_renforcee TEXT NOT NULL CHECK(surveillance_renforcee IN ('Oui','Non'))
+   );
+   CREATE INDEX idx_specialites_statut ON specialites(statut_amm);
+   CREATE INDEX idx_specialites_commercialisation ON specialites(etat_commercialisation);
+   CREATE INDEX idx_specialites_date_amm ON specialites(date_amm);
+
+
+
+6.2 Table des presentations
+ CREATE TABLE presentations (
+    code_cip7 TEXT PRIMARY KEY, -- 7 chiffres
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    libelle TEXT NOT NULL,
+    statut_presentation TEXT NOT NULL,
+    etat_commercialisation TEXT,
+    date_declaration TEXT, -- ISO 8601
+    code_cip13 TEXT NOT NULL UNIQUE, -- 13 chiffres (prefixe 34009)
+    agrement_collectivites TEXT CHECK(agrement_collectivites IN ('oui','non')),
+    taux_remboursement TEXT, -- normalise: "XX%" sans espace
+    prix_euros REAL,
+    prix_honoraires_inclus REAL,
+    honoraires REAL,
+    indications_remboursement TEXT -- texte brut (HTML nettoyé)
+ );
+ CREATE INDEX idx_presentations_cis ON presentations(code_cis);
+ CREATE INDEX idx_presentations_cip13 ON presentations(code_cip13);
+
+
+
+6.3 Table des compositions
+ CREATE TABLE compositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    forme_pharmaceutique TEXT,
+    code_substance TEXT NOT NULL, -- 5 chiffres avec zero initial
+    nom_substance TEXT NOT NULL, -- majuscules
+    dosage TEXT,
+    reference_dosage TEXT,
+    nature_composant TEXT NOT NULL CHECK(nature_composant IN ('SA','FT')),
+    numero_liaison INTEGER -- lien SA/FT
+ );
+ CREATE INDEX idx_compositions_cis ON compositions(code_cis);
+ CREATE INDEX idx_compositions_substance ON compositions(code_substance);
+
+
+
+6.4 Tables HAS (SMR, ASMR, liens CT)
+ CREATE TABLE avis_smr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_dossier_has TEXT NOT NULL, -- format CT-NNNNN
+    motif_evaluation TEXT NOT NULL,
+    date_avis TEXT NOT NULL, -- ISO 8601
+    valeur_smr TEXT NOT NULL,
+    libelle_smr TEXT NOT NULL
+ );
+
+
+ CREATE TABLE avis_asmr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_dossier_has TEXT NOT NULL,
+    motif_evaluation TEXT NOT NULL,
+    date_avis TEXT NOT NULL, -- ISO 8601
+    valeur_asmr TEXT NOT NULL CHECK(valeur_asmr IN ('I','II','III','IV','V')),
+    libelle_asmr TEXT NOT NULL
+ );
+
+
+ CREATE TABLE liens_page_ct (
+   code_dossier_has TEXT NOT NULL,
+   lien_url TEXT NOT NULL,
+   PRIMARY KEY (code_dossier_has, lien_url)
+ );
+ CREATE INDEX idx_avis_smr_cis ON avis_smr(code_cis);
+ CREATE INDEX idx_avis_asmr_cis ON avis_asmr(code_cis);
+
+
+
+6.5 Tables complementaires
+ CREATE TABLE groupes_generiques (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identifiant_groupe INTEGER NOT NULL,
+    libelle_groupe TEXT NOT NULL,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    type_generique INTEGER NOT NULL CHECK(type_generique IN (0,1,2,4)),
+    numero_tri INTEGER
+ );
+ CREATE INDEX idx_generiques_cis ON groupes_generiques(code_cis);
+ CREATE INDEX idx_generiques_groupe ON groupes_generiques(identifiant_groupe);
+
+
+ CREATE TABLE conditions_prescription (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    condition TEXT NOT NULL
+ );
+ CREATE INDEX idx_conditions_cis ON conditions_prescription(code_cis);
+
+
+ CREATE TABLE ruptures_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_cip13 TEXT, -- NULL si rupture au niveau specialite
+    identifiant_disponibilite INTEGER NOT NULL CHECK(identifiant_disponibilite BETWEEN 1 AND 4),
+    etat_disponibilite TEXT NOT NULL, -- normalise: casse initiale
+    date_debut TEXT NOT NULL, -- ISO 8601
+    date_maj TEXT, -- ISO 8601
+    date_fin TEXT, -- ISO 8601, NULL si en cours
+    lien_ansm TEXT
+ );
+ CREATE INDEX idx_ruptures_cis ON ruptures_stock(code_cis);
+
+
+ CREATE TABLE medicaments_mitm (
+    code_cis TEXT PRIMARY KEY REFERENCES specialites(code_cis),
+    code_atc TEXT NOT NULL, -- 7 caracteres (ex: R03BA01)
+    denomination TEXT NOT NULL,
+    lien_bdpm TEXT NOT NULL -- URL HTTPS
+ );
+ CREATE INDEX idx_mitm_atc ON medicaments_mitm(code_atc);
+
+
+ CREATE TABLE infos_securite (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    date_debut TEXT NOT NULL, -- ISO 8601
+    date_fin TEXT, -- ISO 8601, NULL si toujours actif
+    texte_html TEXT, -- contenu brut HTML
+    url_info TEXT -- URL extraite du HTML
+ );
+ CREATE INDEX idx_infos_securite_cis ON infos_securite(code_cis);
+6.6 Table de metadonnees pour le suivi
+   CREATE TABLE import_metadata (
+      fichier TEXT PRIMARY KEY,
+      date_import TEXT NOT NULL, -- ISO 8601 datetime
+      hash_sha256 TEXT NOT NULL,
+      nombre_lignes INTEGER NOT NULL,
+      taille_octets INTEGER NOT NULL,
+      encodage_detecte TEXT NOT NULL, -- ex: "windows-1252"
+      anomalies TEXT -- JSON des anomalies detectees
+   );
+
+
+   CREATE TABLE update_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date_detection TEXT NOT NULL,
+      fichiers_modifies TEXT NOT NULL, -- JSON array
+      source_detection TEXT NOT NULL, -- "hash" / "datagouv" / "page_scrape"
+      action TEXT NOT NULL, -- "downloaded" / "skipped" / "error"
+      detail TEXT -- message d'erreur ou detail supplementaire
+   );
+
+Ce schema presente plusieurs choix de conception importants. Premierement, les codes CIS sont stockes comme
+TEXT et non INTEGER, car bien qu'ils soient numeriques, ils servent d'identifiants et doivent conserver leurs
+eventuels zeros initiaux. Deuxiemement, les dates sont toutes normalisees en ISO 8601 pour permettre les
+comparaisons et tri natifs de SQLite. Troisiemement, la table import_metadata permet de suivre precisement l'etat
+de chaque import, facilitant le diagnostic en cas de probleme. Enfin, la table update_history constitue un journal
+d'audit complet de toutes les detections de changement et actions consequentes, indispensable pour le monitoring
+proactif.
+
+
+
+7. Strategie de Monitoring Proactif
+La BDPM ne fournit ni flux RSS, ni API webhook, ni mecanisme de notification pour les mises a jour. Les
+en-tetes HTTP ne contiennent ni ETag ni Last-Modified, rendant les requetes conditionnelles impossibles. La
+licence BDPM stipule explicitement que les utilisateurs doivent verifier les mises a jour non seulement pour
+chaque mise a jour periodique, mais aussi pour les modifications intervenues entre deux mises a jour periodiques.
+Cette exigence renforce la necessite d'un monitoring proactif et fiable. La strategie proposee repose sur trois
+couches de detection, par ordre de priorite et de fiabilite.
+
+
+7.1 Couche 1 : Hash SHA-256 des fichiers (primaire)
+Puisque les en-tetes HTTP conditionnels ne sont pas disponibles, la methode la plus fiable consiste a telecharger
+les fichiers et a comparer leur empreinte SHA-256 avec celle de la version precedemment importee. Cette
+approche est definitive : si le hash change, le contenu a change. Si le hash est identique, le fichier est identique,
+independamment de toute autre consideration. Le cout est un telechargement complet de chaque fichier (environ
+26 Mo au total), mais cette operation est rapide et peut etre effectuee en dehors des heures de pointe. En Rust, le
+telechargement avec reqwest et le calcul de hash avec sha2 sont triviaux et performants.
+7.2 Couche 2 : API data.gouv.fr (secondaire)
+Le jeu de donnees BDPM est egalement publie sur data.gouv.fr, qui dispose d'une API REST documentee.
+L'endpoint
+/api/1/datasets/base-de-donnees-publique-des-medicaments-base-officielle/
+retourne un objet JSON contenant le champ last_update (horodatage de la derniere mise a jour du jeu de donnees)
+ainsi que les ressources individuelles avec leurs dates de modification et checksums. Interroger cette API est
+nettement moins couteux que de telecharger l'ensemble des fichiers (reponse JSON de quelques kilo-octets), mais
+elle peut avoir un retard par rapport aux fichiers originaux sur le site BDPM. Elle constitue donc un excellent
+complement pour detecter les mises a jour avant de proceder au telechargement complet.
+
+
+7.3 Couche 3 : Scraping de la page telechargement (secours)
+En dernier recours, la page de telechargement de la BDPM affiche les dates de mise a jour de chaque fichier.
+L'analyse du HTML permet d'extraire ces dates et de les comparer avec les dates precedemment enregistrees.
+Cette methode est fragile (le format HTML peut changer sans preavis) mais offre une indication rapide de mise a
+jour sans telechargement. En Rust, la crate scraper permet de parser le HTML efficacement.
+
+
+7.4 Strategie de sondage adaptatif
+La BDPM est mise a jour mensuellement, mais certains fichiers (notamment CIS_CIP_Dispo_Spec.txt pour les
+ruptures de stock et CIS_InfoImportantes.txt pour les informations de securite) peuvent etre mis a jour plus
+frequemment. La strategie de sondage proposee s'adapte a cette cadence en adjustant l'intervalle de verification en
+fonction du temps ecoule depuis la derniere mise a jour detectee, tout en evitant le spam du serveur. Un jitter
+aleatoire de plus ou moins 20 % est applique a chaque intervalle pour eviter l'effet de troupeau si plusieurs
+utilisateurs implementent la meme strategie.
+
+
+               Periode                   Intervalle de sondage                             Justification
+
+   Premiere semaine du mois         Toutes les 6 heures                   Mise a jour typique en debut de mois
+
+   Deuxieme semaine du mois         Toutes les 12 heures                  Mise a jour encore possible
+
+   Reste du mois                    Toutes les 24 heures                  Peu probable de changement
+
+   Apres detection d'une MAJ        Toutes les 2 heures pendant 48h       Capturer les corrections subsequentes
+
+   InfoImportantes (dynamique)      Toutes les 6 heures                   Fichier genere en temps reel
+
+                                       Tableau 7 : Strategie de sondage adaptatif
+
+
+7.5 Regles de politesse et limitation de debit
+Le respect du serveur BDPM est primordial. Les regles suivantes doivent etre strictement appliquees par toute
+implementation. Premierement, un intervalle minimum de 2 secondes entre chaque requete consecutive vers le
+serveur BDPM. Deuxiemement, un User-Agent descriptif avec des informations de contact doit accompagner
+chaque requete. Troisiemement, une seule connexion simultanee vers le serveur BDPM (requetes seriees
+uniquement). Quatriemement, preference pour les verifications entre 02h00 et 06h00 CET, en dehors des heures
+de pointe. Cinquiemement, un backoff exponentiel en cas d'erreur, commencant a 30 secondes avec un maximum
+d'une heure. Sixiemement, mise en cache agressive : ne retelecharger que les fichiers dont le hash a effectivement
+change. Ces regles sont d'autant plus importantes que le serveur ne semble pas disposer d'un systeme de limitation
+de debit explicite, ce qui signifie qu'un comportement abusif pourrait entrainer un blocage IP.
+
+
+
+8. Architecture du Futur Projet Rust
+Cette section propose l'architecture globale du projet Rust qui implementera l'ensemble des recommandations
+precedentes. Le projet est concu comme un outil en ligne de commande (CLI) modulaire, avec une separation
+claire entre les couches de telechargement, de parsing, de transformation, de stockage et de monitoring. Cette
+architecture privilegie la robustesse, la performance et la maintenabilite, tout en restant suffisamment simple pour
+etre implemente progressivement.
+
+
+8.1 Crates Rust recommandees
+
+                      Versio
+            Crate                                                        Utilisation
+                        n
+
+     reqwest          0.12.x    Client HTTP asynchrone avec TLS et gestion des en-tetes
+
+     tokio            1.x       Runtime asynchrone pour la planification et le parallélisme
+
+     sha2             0.10.x    Calcul de hash SHA-256 pour la detection de changements
+
+     rusqlite         0.31.x    Liaisons SQLite avec support des transactions et FTS5
+
+     encoding_rs      0.8.x     Decodage Windows-1252/Latin-1 vers UTF-8 sans perte
+
+     chrono           0.4.x     Parsing et formatage des dates dans les trois formats BDPM
+
+     scraper          0.20.x    Parsing HTML pour le scraping de la page telechargement (secours)
+
+     serde +
+                      1.x       Parsing JSON pour l'API data.gouv.fr
+     serde_json
+
+     clap             4.x       Interface CLI avec sous-commandes (fetch, import, serve, monitor)
+
+     tracing          0.1.x     Journalisation structuree pour le monitoring et le diagnostic
+
+     thiserror        1.x       Gestion d'erreurs idiomatique et typée
+
+     rss              2.x       Parsing de flux RSS (si un flux futur est detecte)
+
+     rand             0.8.x     Jitter pour les intervalles de sondage adaptatif
+
+                                   Tableau 8 : Crates Rust recommandees pour le projet
+
+
+8.2 Structure des modules
+  bdpm-tools/
+  |-- Cargo.toml
+  |-- src/
+  |    |-- main.rs                           // Point d'entree CLI
+  |    |-- config.rs                        // Configuration (URLs, intervalles)
+  |    |-- error.rs                          // Types d'erreur centralises
+  |    |-- fetch/
+  |    |     |-- mod.rs                       // Telechargement + politesse
+  |    |     |-- encoding.rs                 // Detection/normalisation encodage
+  |    |     |-- hash.rs                       // Calcul et comparaison SHA-256
+  |    |-- parse/
+  |    |     |-- mod.rs                       // Dispatch par fichier
+  |    |     |-- cis.rs                        // Parseur specialites
+  |    |     |-- cip.rs                        // Parseur presentations
+  |    |     |-- compo.rs                      // Parseur compositions
+  |    |     |-- has.rs                         // Parseur avis SMR/ASMR
+  |    |     |-- gener.rs                      // Parseur generiques
+  |    |     |-- dispo.rs                      // Parseur ruptures
+  |    |     |-- normalise.rs                // Dates, apostrophes, pourcentages
+  |    |-- db/
+  |    |     |-- mod.rs                       // Schema + connexion SQLite
+  |    |     |-- import.rs                      // Insertion en base
+  |    |     |-- query.rs                       // Requetes predefinies
+  |    |-- monitor/
+  |    |     |-- mod.rs                       // Orchestrateur de monitoring
+  |    |     |-- datagouv.rs                  // Client API data.gouv.fr
+  |    |     |-- scheduler.rs                  // Sondage adaptatif + jitter
+  |-- migrations/
+  |    |-- 001_init.sql                      // Schema initial
+  |-- tests/
+  |    |-- test_parse_cis.rs               // Tests unitaires parsing
+  |    |-- test_encoding.rs                 // Tests encodage
+  |    |-- test_normalise.rs                // Tests normalisation
+
+
+
+8.3 Pipeline de traitement
+Le pipeline de traitement se decompose en cinq etapes sequentielles, chacune independante et testable
+uniquement. La premiere etape est le telechargement (fetch) : chaque fichier est telecharge via reqwest avec un
+User-Agent descriptif, en respectant un intervalle de 2 secondes entre les requetes. Les fichiers sont sauvegardes
+temporairement avec leur hash SHA-256 calcule a la volee pendant le telechargement, evitant une lecture
+supplementaire. La deuxieme etape est la detection d'encodage : chaque fichier est inspecte pour determiner son
+encodage (Windows-1252, UTF-8 ou ASCII), puis decode en UTF-8. Les caracteres 0x92 (apostrophe courbe)
+sont remplaces par l'apostrophe standard. La troisieme etape est le parsing TSV : les lignes sont decoupees sur les
+tabulations, les lignes vides filtrees, et chaque champ est nettoye (strip des espaces, normalisation des
+pourcentages, conversion des dates en ISO 8601). La quatrieme etape est l'import SQLite : les donnees sont
+inserees dans une transaction SQLite avec verification des contraintes de cle etrangere (PRAGMA foreign_keys =
+ON). Les lignes dupliquees sont ignorees silencieusement (INSERT OR IGNORE). La cinquieme etape est la
+validation : des requetes de verification sont executees pour confirmer le nombre d'enregistrements par table,
+l'absence de valeurs NULL inattendues, et la coherence des cles etrangeres.
+
+
+8.4 Sous-commandes CLI proposees
+           Commande                                                       Description
+
+   bdpm fetch                    Telecharge tous les fichiers BDPM (ou uniquement ceux modifies)
+
+   bdpm import                   Parse et importe les fichiers telecharges dans SQLite
+
+   bdpm update                   Execute fetch + import en une seule operation (workflow complet)
+
+   bdpm monitor                  Lance le daemon de monitoring avec sondage adaptatif
+
+   bdpm status                   Affiche l'etat actuel de la base (dates d'import, nombre d'enregistrements)
+
+   bdpm check                    Verifie l'integrite de la base (cles etrangeres, doublons, anomalies)
+
+   bdpm search                   Recherche full-text dans la base (FTS5)
+
+   bdpm export                   Exporte la base en JSON/CSV/Parquet
+
+                                        Tableau 9 : Sous-commandes CLI proposees
+
+
+
+
+9. Analyse des En-Tetes HTTP et du Serveur
+L'analyse detaillee des en-tetes HTTP renvoyees par le serveur BDPM revele plusieurs informations importantes
+pour l'implementation du client de telechargement. Le serveur est identifie uniquement par "Server: Unknown",
+suggérant une configuration deliberee pour masquer la technologie sous-jacente. Le Content-Type est
+systematiquement        application/octet-stream                  sauf     pour     CIS_InfoImportantes.txt        qui    utilise
+application/force-download. Le transfer est systematiquement chunked (Transfer-Encoding: chunked),
+ce qui signifie que le Content-Length n'est pas disponible et que la taille totale ne peut pas etre connue avant la fin
+du telechargement. Le Cache-Control est positionne a "private, must-revalidate" avec Pragma: no-cache et
+Expires: 0, indiquant que le serveur ne souhaite aucune mise en cache intermediaire.
+
+L'absence d'ETag et de Last-Modified constitue le probleme principal pour le monitoring. Sans ces en-tetes, il est
+impossible d'utiliser les requetes conditionnelles HTTP (If-None-Match, If-Modified-Since) qui permettent de
+recevoir une reponse 304 Not Modified sans corps si le fichier n'a pas change. La seule alternative fiable est le
+telechargement complet suivi d'une comparaison par hash. Le serveur envoie egalement des en-tetes de securite
+standard (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Content-Security-Policy), avec des
+dupliquas notables (X-Frame-Options DENY et SAMEORIGIN simultanement, X-Content-Type-Options en
+double). Le CSP inclut un nonce qui change a chaque requete, confirmant l'absence de cache cote serveur.
+
+
+           En-tete                              Valeur                                            Remarque
+
+    Content-Type            application/octet-stream                              Sauf InfoImportantes (force-download)
+
+    Cache-Control           private, must-revalidate                              Pas de cache intermediaire
+
+    Content-Disposition     attachment; filename="XXX"                            Timestamp pour InfoImportantes
+
+    Transfer-Encoding       chunked                                               Pas de Content-Length
+    ETag                    ABSENT                                           Pas de requetes conditionnelles
+
+    Last-Modified           ABSENT                                           Pas de If-Modified-Since
+
+    X-Frame-Options         DENY + SAMEORIGIN                                Duplication anormale
+
+    CSP                     Avec nonce dynamique                             Change a chaque requete
+
+                                 Tableau 10 : En-tetes HTTP significatifs du serveur BDPM
+
+
+
+
+10. API et Outils Existantes
+Plusieurs initiatives communautaires existent pour exposer les donnees BDPM sous forme d'API, mais aucune
+n'est officielle et la plupart sont plus ou moins maintenues. L'API la plus notable est api-medicaments.fr, une API
+REST commerciale qui propose un tier gratuit (100 requetes/jour) et des tiers payants jusqu'a 50 000 requetes/jour,
+avec une mise a jour quotidienne depuis la BDPM. Le projet est probablement alimente par le depot GitHub
+giygas/medicaments-api, qui implemente une API rapide avec mise a jour automatique deux fois par jour et cache
+intelligent. L'API Mdicaments FR est egalement listee sur data.gouv.fr comme dataservice, mais son statut exact
+est incertain.
+
+Le projet betagouv/api-medicaments etait une initiative officielle du gouvernement francais, mais il est desormais
+deporte et les auteurs invitent une administration a le relancer. Le projet axel-op/api-bdpm-graphql propose une
+API GraphQL fortement typee qui resout les relations complexes entre fichiers, mais n'a pas ete mis a jour depuis
+decembre 2022. Enfin, le depot redouane-b/pharma-data-hub-france contient un notebook Jupyter analysant les
+donnees BDPM, et kjmano/doseralert-bdpm-data fournit des instantanes mensuels via le CDN jsDelivr,
+consommes par l'application mobile Doser Alert. Aucune de ces initiatives ne repond completement au besoin
+d'une base de donnees locale, complete et a jour, ce qui justifie la creation d'un outil dedie en Rust.
+
+Du cote des donnees complementaires, le portail data.ansm.sante.fr fournit des donnees de pharmacovigilance
+(declarations d'effets indesirables, erreurs de medication, ruptures d'approvisionnement depuis 2014), tandis
+qu'Open Medic (Ameli) publie annuellement les donnees de remboursement des medicaments. Le projet Romedi
+offre une base de donnees semantique derivee de la BDPM au format web semantique, et esante.gouv.fr propose
+des alignements FHIR entre les codes CIP BDPM et les codes CIP-UCD. Ces sources complementaires pourraient
+etre integrees dans une version future du projet Rust pour enrichir la base SQLite.
+
+
+
+11. Recommandations Finales
+Cette analyse technique approfondie de la BDPM a mis en lumiere les defis significatifs mais surmontables que
+represente la creation d'une base de donnees propre et fiable a partir des fichiers publies. Les recommandations
+suivantes resument les points essentiels pour le futur projet Rust, par ordre de priorite d'implementation.
+
+
+11.1 Priorite 1 : Pipeline d'import robuste
+La premiere etape du projet doit etre l'implementation d'un pipeline d'import capable de gerer l'ensemble des
+quirks identifies. Cela inclut le decodage automatique en Windows-1252 (avec fallback UTF-8), la normalisation
+des apostrophes courbes, la conversion des trois formats de date en ISO 8601, le nettoyage des espaces superflus,
+la deduplication des lignes, et l'extraction du HTML des champs de remboursement et d'information de securite.
+Chaque etape doit etre testee unitairement avec des donnees reelles et des cas limites, et le pipeline doit produire
+un rapport d'anomalies detaille pour chaque import. L'utilisation de la crate encoding_rs est recommandee pour le
+decodage, et chrono pour les dates.
+
+
+11.2 Priorite 2 : Base SQLite avec schema normalise
+Le schema SQLite propose dans la section 6 doit etre implemente avec les contraintes de cle etrangere activees
+(PRAGMA foreign_keys = ON) et les index necessaires pour les requetes courantes. L'activation de FTS5
+(full-text search) sur les champs textuels principaux (denomination, libelle, motif d'avis) permettra des recherches
+performantes. La table import_metadata est essentielle pour le suivi et le diagnostic. Il est recommande d'utiliser
+les transactions SQLite pour garantir l'atomicite de chaque import complet (soit toutes les tables sont mises a jour,
+soit aucune ne l'est). La crate rusqlite avec le featurebundled permet d'inclure SQLite directement dans le binaire,
+evitant toute dependance systeme.
+
+
+11.3 Priorite 3 : Monitoring proactif avec sondage adaptatif
+Le daemon de monitoring doit implementer les trois couches de detection (hash SHA-256, API data.gouv.fr,
+scraping de page) avec la strategie de sondage adaptatif. L'implementation doit inclure un mecanisme de
+persistance pour les hashs precedents, les dates de derniere verification, et l'historique des mises a jour. Un
+systeme de notification (email, webhook, ou simplement fichier de log) doit alerter l'utilisateur lorsqu'une mise a
+jour est detectee. Le jitter aleatoire est indispensable pour eviter le spam du serveur, et les regles de politesse
+doivent etre strictement respectees. La planification peut utiliser un systeme de cron simple ou un scheduler dedie
+base sur tokio.
+
+
+11.4 Priorite 4 : API locale et export
+Une fois la base SQLite operationnelle et maintenue a jour, l'ajout d'une couche API locale (par exemple avec la
+crate axum ou actix-web) permettrait d'exposer les donnees via une interface REST ou GraphQL. Cette API locale
+pourrait servir de source de donnees pour des applications tierces, des tableaux de bord, ou des outils d'analyse.
+L'export en JSON, CSV ou Parquet faciliterait l'integration avec d'autres systemes. La recherche full-text via FTS5
+pourrait etre exposee directement via l'API, offrant des capacites de recherche avancees similaires a celles du site
+web de la BDPM mais avec des performances superieures grace au stockage local.
+
+
+Ce rapport constitue le fondement technique pour le developpement du projet Rust. L'ensemble des donnees
+analysees, des problemes identifies et des recommandations formulees fournit une base solide pour une
+implementation methodique et robuste. La BDPM, malgre ses irregularites de formatage et d'encodage, reste une
+source de donnees fiable et complete qui merite un outillage moderne et proactif pour en tirer le meilleur parti.
+

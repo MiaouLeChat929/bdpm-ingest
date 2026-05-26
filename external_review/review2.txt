@@ -1,0 +1,619 @@
+Voici l'étude de faisabilité complète, structurée pour te permettre de décider comment lancer le projet Rust.
+
+---
+
+# Étude de faisabilité : Pipeline BDPM → SQLite pour projet Rust
+
+## 1. État des lieux des sources et contraintes pratiques
+
+### 1.1 Source unique et cadence
+- **URL de téléchargement** : `https://base-donnees-publique.medicaments.gouv.fr/telechargement`
+- **Fréquence officielle** : mise à jour mensuelle (indiquée explicitement sur la page)
+- **Signal de fraîcheur** : la date de dernière mise à jour est affichée en haut de page (ex: *"Dernière mise à jour le 28/04/2026"*)
+- **Granularité fichier par fichier** : les fichiers n'ont pas tous la même date de mise à jour. Exemples observés :
+  - Spécialités : 28/04/2026
+  - Présentations : 25/05/2026
+  - Ruptures : 19/05/2026
+  - MITM : 09/03/2026
+  - Informations importantes : **générées en direct** (nom dynamique avec timestamp)
+
+### 1.2 Fichiers publiés (11 fichiers)
+| Fichier | Clé primaire | Clé étrangère | Fréquence |
+|---|---|---|---|
+| `CIS_bdpm.txt` | Code CIS | — | Mensuelle |
+| `CIS_CIP_bdpm.txt` | Code CIP7 | Code CIS | Mensuelle |
+| `CIS_COMPO_bdpm.txt` | — (lignes composants) | Code CIS | Mensuelle |
+| `CIS_HAS_SMR_bdpm.txt` | — | Code CIS + Code dossier HAS | Mensuelle |
+| `CIS_HAS_ASMR_bdpm.txt` | — | Code CIS + Code dossier HAS | Mensuelle |
+| `HAS_LiensPageCT_bdpm.txt` | Code dossier HAS | — | Mensuelle |
+| `CIS_GENER_bdpm.txt` | — | Code CIS | Mensuelle |
+| `CIS_CPD_bdpm.txt` | — | Code CIS | Mensuelle |
+| `CIS_InfoImportantes_AAAAMMJJhhmiss_bdpm.txt` | — | Code CIS | **En direct** |
+| `CIS_CIP_Dispo_Spec.txt` | — | Code CIS / CIP13 | Mensuelle |
+| `CIS_MITM_bdpm.txt` | — | Code CIS | Irrégulière |
+
+### 1.3 Format technique (documenté dans le PDF v4 de l'ANSM)
+- **Extension** : `.txt`
+- **Séparateur** : tabulation (`\t`) — pas de virgule
+- **Délimiteurs de texte** : **aucun** (pas de guillemets)
+- **En-tête** : **aucun** (la première ligne est une donnée)
+- **Encodage** : non explicitement documenté, mais les retours d'expérience des parsers existants indiquent **Windows-1252** (ou ISO-8859-1). L'UTF-8 pur provoque des erreurs sur les caractères accentués.
+- **Fin de ligne** : probablement CRLF (`\r\n`) vu l'écosystème Windows de l'ANSM.
+
+### 1.4 Contraintes réseau et légales
+- **Pas d'API REST** : seul le téléchargement de fichiers plats est disponible.
+- **Licence ouverte** (loi CADA) : reproduction et redistribution autorisées, à condition de citer la source et la date de mise à jour.
+- **Pas de rate-limiting documenté**, mais il faut rester respectueux : un check mensuel + téléchargement conditionnel suffit amplement.
+- **Pas de HEAD/ETag fiable** sur les fichiers individuels (à vérifier, mais les serveurs gouvernementaux classiques ne sont pas toujours bien configurés pour le cache HTTP).
+
+---
+
+## 2. Problèmes de qualité et de format à anticiper
+
+### 2.1 Parsing CSV/TSV classiques
+| Risque | Description | Mitigation |
+|---|---|---|
+| **Pas d'en-têtes** | Impossible de valider par nom de colonne | Schéma codé en dur, validation par nombre de colonnes attendu |
+| **Pas de guillemets** | Les tabulations ou retours à la ligne dans les champs texte cassent le parsing ligne à ligne | Utiliser un parser TSV robuste (pas `split('\t')` naïf) ; vérifier la cohérence du nombre de colonnes par ligne |
+| **Séparateurs internes `;`** | Voies d'administration, taux de remboursement, titulaires contiennent des `;` comme séparateur de valeurs multiples | Parser le champ comme une chaîne, puis split sur `;` en post-traitement |
+| **Encodage incertain** | Windows-1252 vs ISO-8859-1 vs UTF-8 | Essayer UTF-8 en premier, fallback sur Windows-1252 avec `encoding_rs` ou `chardet` |
+
+### 2.2 Formats de dates inconsistants
+- `JJ/MM/AAAA` dans la plupart des fichiers (spécialités, présentations, compositions, infos importantes, disponibilités)
+- `AAAAMMJJ` dans les fichiers HAS (SMR, ASMR)
+- Dates manquantes possibles (champs vides)
+
+### 2.3 Valeurs manquantes et incohérences
+- Champs numériques vides (prix, honoraires)
+- Code CIP13 absent pour certaines présentations
+- Code CIP7 vs CIP13 : certains médicaments n'ont pas de CIP13 (présentations non commercialisées ?)
+- Dans `CIS_CIP_Dispo_Spec.txt`, le CIP13 peut être vide si toutes les présentations sont concernées
+- Le fichier des infos importantes a un **nom de fichier variable** (timestamp dans le nom)
+
+### 2.4 Évolutions de schéma
+- L'ANSM a déjà modifié la structure dans le passé (ajout du fichier MITM, modification du format des disponibilités en octobre 2023)
+- Le PDF de documentation est daté (v4, 27/08/2025) : il peut y avoir des changements non documentés
+- **Stratégie** : versionner le schéma de parsing et logger les anomalies
+
+### 2.5 Données dénormalisées
+- Titulaires multiples dans une même cellule (`;`)
+- Taux de remboursement multiples (`;`)
+- Voies d'administration multiples (`;`)
+- Le fichier de composition a une structure "un médicament = plusieurs lignes" (un principe actif par ligne)
+
+---
+
+## 3. Méthodologie de collecte et de mise à jour fiable
+
+### 3.1 Détection des nouveautés (stratégie recommandée)
+
+**Approche hybride : page HTML + métadonnées**
+
+```python
+# Logique conceptuelle
+def check_update():
+    resp = requests.get(TELECHARGEMENT_URL, headers=headers, timeout=30)
+    html = resp.text
+    
+    # Extraction de la date globale
+    global_date = extract_date_from_banner(html)  # "Dernière mise à jour le 28/04/2026"
+    
+    # Extraction des dates par fichier
+    file_dates = extract_file_dates(html)  # parsing des <li> ou <a> avec dates
+    
+    # Comparaison avec la dernière exécution stockée localement
+    if global_date > last_known_date:
+        download_files()
+```
+
+**Pourquoi cette approche et pas un simple HEAD/ETag ?**
+- Les serveurs gouvernementaux ne garantissent pas des `Last-Modified` ou `ETag` fiables sur chaque fichier.
+- La page HTML contient explicitement les dates de mise à jour par fichier.
+- C'est la source de vérité visuelle que les utilisateurs humains consultent.
+
+**Pour le fichier des informations importantes (généré en direct) :**
+- Le nom contient un timestamp : `CIS_InfoImportantes_20260526120000_bdpm.txt`
+- Il faut parser la page HTML pour extraire l'URL exacte du lien, puis télécharger.
+- Comparer par hash du contenu (pas par nom de fichier).
+
+### 3.2 Téléchargement respectueux
+
+| Règle | Justification |
+|---|---|
+| **User-Agent explicite** | Identifier le bot : `BDPM-Pipeline/1.0 (contact@example.com)` |
+| **1 requête toutes les 2-5 secondes** | Éviter toute accusation de spam sur un serveur gouvernemental |
+| **Téléchargement conditionnel** | Ne télécharger que si la date de la page a changé |
+| **Retry avec backoff** | 3 tentatives max, backoff exponentiel |
+| **Timeout généreux** | 60s pour les fichiers (certains font >4 Mo) |
+
+### 3.3 Stockage des artefacts bruts
+
+```
+data/
+├── raw/
+│   ├── 2026-04-28/
+│   │   ├── CIS_bdpm.txt
+│   │   ├── CIS_CIP_bdpm.txt
+│   │   └── ...
+│   └── 2026-05-25/
+│       └── ...
+├── processed/
+│   └── bdpm.db
+└── manifest.json  # dates, hashes, versions
+```
+
+**Manifest** : un fichier JSON qui trace pour chaque run :
+- date de collecte
+- date de mise à jour de la source
+- hash SHA-256 de chaque fichier brut
+- nombre de lignes
+- version du parser utilisé
+
+---
+
+## 4. Stratégie de parsing, normalisation, CQ et traçabilité
+
+### 4.1 Pipeline de traitement (étapes)
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌─────────────┐    ┌──────────┐
+│  Download   │───▶│   Decode     │───▶│    Parse    │───▶│  Validate   │───▶│  Load    │
+│   (HTTP)    │    │ (encoding)   │    │   (TSV)     │    │  (schema)   │    │ (SQLite) │
+└─────────────┘    └──────────────┘    └─────────────┘    └─────────────┘    └──────────┘
+```
+
+### 4.2 Décodage et détection d'encodage
+
+**Stratégie recommandée :**
+1. Essayer UTF-8 en premier (strict)
+2. Si échec → Windows-1252 (ou ISO-8859-1)
+3. Enregistrer l'encodage détecté dans le manifest
+
+En Rust : `encoding_rs` est parfait pour cela.
+
+### 4.3 Parsing TSV robuste
+
+**Ne pas faire :**
+```rust
+// FRAGILE
+let cols: Vec<&str> = line.split('\t').collect();
+```
+
+**Faire :**
+- Utiliser `csv` crate avec `Delimiter::b'\t'` et `QuoteStyle::Never` (ou gestion manuelle des quotes absentes)
+- Vérifier que chaque ligne produit le nombre attendu de colonnes
+- Logger les lignes anormales (trop/pas assez de colonnes) dans un fichier `rejects/`
+
+### 4.4 Normalisation des données
+
+| Transformation | Détail |
+|---|---|
+| **Dates** | Normaliser en `YYYY-MM-DD` (ISO 8601) ou `Option<NaiveDate>`. Deux parsers distincts selon le fichier. |
+| **Nombres décimaux** | Remplacer `,` par `.` si nécessaire, parser en `Decimal` (crate `rust_decimal`) pour éviter les flottants |
+| **Valeurs multiples (`;`)** | Split en `Vec<String>`, trim, dédoublonner |
+| **Texte** | Trim des espaces, normalisation des espaces multiples |
+| **Booléens** | `"Oui"`/`"Non"`, `"oui"`/`"non"` → `Option<bool>` |
+| **Valeurs manquantes** | Chaînes vides → `None` (Option), pas `""` |
+
+### 4.5 Contrôle qualité systématique
+
+**Assertions à implémenter :**
+
+```rust
+// Exemples de validations
+assert!(cis.len() == 11, "CIS doit faire 11 caractères");
+assert!(cip7.len() == 7, "CIP7 doit faire 7 caractères");
+assert!(cip13.chars().all(|c| c.is_ascii_digit()), "CIP13 doit être numérique");
+assert!(prix >= 0.0, "Prix ne peut pas être négatif");
+assert!(date_amm <= today, "Date AMM ne peut pas être dans le futur");
+```
+
+**Contrôles relationnels :**
+- Tous les `Code CIS` des fichiers fils existent dans `CIS_bdpm.txt`
+- Tous les `Code CIP7` des disponibilités existent dans `CIS_CIP_bdpm.txt`
+- Tous les `Code dossier HAS` des liens CT existent dans SMR ou ASMR
+
+**Métriques de qualité à logger :**
+- Nombre de lignes rejetées par fichier
+- Taux de remplissage par colonne
+- Distribution des longueurs de champs texte
+- Nombre d'erreurs d'encodage corrigées
+
+### 4.6 Traçabilité
+
+Chaque ligne dans SQLite doit pouvoir être tracée jusqu'à son fichier source :
+- Table `import_log` : id, date, fichier_source, hash, nombre_lignes
+- Colonne `import_id` dans chaque table de données (FK vers `import_log`)
+
+---
+
+## 5. Proposition de schéma SQLite
+
+### 5.1 Tables principales
+
+```sql
+-- Journal des imports
+CREATE TABLE import_log (
+    id INTEGER PRIMARY KEY,
+    import_date TEXT NOT NULL,           -- ISO 8601
+    source_date TEXT NOT NULL,           -- Date de mise à jour BDPM
+    file_name TEXT NOT NULL,
+    file_hash TEXT NOT NULL,             -- SHA-256
+    row_count INTEGER,
+    reject_count INTEGER,
+    encoding_detected TEXT
+);
+
+-- Spécialités (fichier central)
+CREATE TABLE specialites (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL UNIQUE,
+    denomination TEXT NOT NULL,
+    forme_pharmaceutique TEXT,
+    voies_administration TEXT,           -- JSON array ["orale", "intraveineuse"]
+    statut_amm TEXT,
+    type_procedure_amm TEXT,
+    etat_commercialisation TEXT,
+    date_amm TEXT,                       -- YYYY-MM-DD
+    statut_bdm TEXT,                     -- "Alerte" ou "Warning disponibilite"
+    numero_autorisation_europeenne TEXT,
+    titulaires TEXT,                     -- JSON array
+    surveillance_renforcee INTEGER,      -- 0/1
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Présentations
+CREATE TABLE presentations (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_cip7 TEXT NOT NULL,
+    libelle TEXT,
+    statut_administratif TEXT,
+    etat_commercialisation TEXT,
+    date_declaration_commercialisation TEXT,
+    code_cip13 TEXT,
+    agrement_collectivites TEXT,         -- "oui", "non", "inconnu"
+    taux_remboursement TEXT,             -- JSON array
+    prix_medicament_euro REAL,
+    prix_public_france_euro REAL,
+    honoraires_dispensation_euro REAL,
+    indications_remboursement TEXT,
+    import_id INTEGER REFERENCES import_log(id),
+    UNIQUE(code_cip7)
+);
+
+-- Compositions
+CREATE TABLE compositions (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    designation_element_pharmaceutique TEXT,
+    code_substance TEXT,
+    denomination_substance TEXT,
+    dosage TEXT,
+    reference_dosage TEXT,
+    nature_composant TEXT,               -- "SA" ou "ST"
+    numero_liaison INTEGER,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Avis SMR HAS
+CREATE TABLE avis_smr (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_dossier_has TEXT NOT NULL,
+    motif_evaluation TEXT,
+    date_avis TEXT,                      -- YYYY-MM-DD
+    valeur_smr TEXT,
+    libelle_smr TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Avis ASMR HAS
+CREATE TABLE avis_asmr (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_dossier_has TEXT NOT NULL,
+    motif_evaluation TEXT,
+    date_avis TEXT,
+    valeur_asmr TEXT,
+    libelle_asmr TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Liens Commission Transparence
+CREATE TABLE liens_ct (
+    id INTEGER PRIMARY KEY,
+    code_dossier_has TEXT NOT NULL UNIQUE,
+    lien_avis_ct TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Groupes génériques
+CREATE TABLE groupes_generiques (
+    id INTEGER PRIMARY KEY,
+    identifiant_groupe TEXT NOT NULL,
+    libelle_groupe TEXT,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    type_generique INTEGER,              -- 0,1,2,4
+    numero_tri INTEGER,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Conditions prescription/délivrance
+CREATE TABLE conditions_prescription (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    condition_prescription TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Informations importantes
+CREATE TABLE infos_importantes (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    date_debut TEXT,
+    date_fin TEXT,
+    texte TEXT,
+    lien TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Disponibilités
+CREATE TABLE disponibilites (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_cip13 TEXT REFERENCES presentations(code_cip13),
+    code_statut INTEGER,                 -- 1,2,3,4
+    libelle_statut TEXT,
+    date_debut TEXT,
+    date_mise_a_jour TEXT,
+    date_remise_disposition TEXT,
+    lien_ansm TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+
+-- Médicaments d'intérêt thérapeutique majeur
+CREATE TABLE mitm (
+    id INTEGER PRIMARY KEY,
+    code_cis TEXT NOT NULL REFERENCES specialites(code_cis),
+    code_atc TEXT,
+    denomination TEXT,
+    lien_bdpm TEXT,
+    import_id INTEGER REFERENCES import_log(id)
+);
+```
+
+### 5.2 Index recommandés
+
+```sql
+CREATE INDEX idx_specialites_code_cis ON specialites(code_cis);
+CREATE INDEX idx_presentations_code_cis ON presentations(code_cis);
+CREATE INDEX idx_presentations_cip7 ON presentations(code_cip7);
+CREATE INDEX idx_presentations_cip13 ON presentations(code_cip13);
+CREATE INDEX idx_compositions_code_cis ON compositions(code_cis);
+CREATE INDEX idx_compositions_substance ON compositions(denomination_substance);
+CREATE INDEX idx_avis_smr_cis ON avis_smr(code_cis);
+CREATE INDEX idx_avis_asmr_cis ON avis_asmr(code_cis);
+CREATE INDEX idx_generiques_cis ON groupes_generiques(code_cis);
+CREATE INDEX idx_generiques_id ON groupes_generiques(identifiant_groupe);
+CREATE INDEX idx_conditions_cis ON conditions_prescription(code_cis);
+CREATE INDEX idx_infos_cis ON infos_importantes(code_cis);
+CREATE INDEX idx_dispo_cis ON disponibilites(code_cis);
+CREATE INDEX idx_mitm_cis ON mitm(code_cis);
+```
+
+### 5.3 Vues utiles
+
+```sql
+-- Vue complète médicament + présentations + composition
+CREATE VIEW v_medicament_complet AS
+SELECT s.*, p.code_cip7, p.code_cip13, p.libelle as presentation,
+       GROUP_CONCAT(DISTINCT c.denomination_substance) as substances
+FROM specialites s
+LEFT JOIN presentations p ON s.code_cis = p.code_cis
+LEFT JOIN compositions c ON s.code_cis = c.code_cis
+GROUP BY s.code_cis, p.code_cip7;
+```
+
+---
+
+## 6. Architecture de pipeline réaliste pour Rust
+
+### 6.1 Structure de crates (workspace)
+
+```
+bdpm-pipeline/
+├── Cargo.toml
+├── crates/
+│   ├── bdpm-core/          # Types, schéma, modèles
+│   ├── bdpm-fetch/         # Téléchargement HTTP
+│   ├── bdpm-parse/         # Parsing TSV, décodage, normalisation
+│   ├── bdpm-validate/      # Règles de validation
+│   ├── bdpm-db/            # Import SQLite (sqlx ou rusqlite)
+│   └── bdpm-cli/           # Binaire principal
+```
+
+### 6.2 Dépendances Rust clés
+
+| Besoin | Crate recommandée | Justification |
+|---|---|---|
+| HTTP | `reqwest` | Standard, async, timeouts configurables |
+| Parsing TSV | `csv` avec `Delimiter::b'\t'` | Gère les cas limites (quotes, CRLF) |
+| Encodage | `encoding_rs` | Détection UTF-8/Windows-1252, performant |
+| Dates | `chrono` | Parsing JJ/MM/AAAA et AAAAMMJJ |
+| Décimaux | `rust_decimal` | Précision exacte pour les prix |
+| SQLite | `sqlx` (async) ou `rusqlite` (sync) | `sqlx` permet la vérification à la compilation |
+| CLI | `clap` | Arguments, sous-commandes |
+| Config | `config` + `serde` | Fichier de configuration |
+| Logging | `tracing` + `tracing-subscriber` | Journal structuré, compatible journald |
+| Hash | `sha2` | Vérification d'intégrité |
+
+### 6.3 Flux de données (async ou sync ?)
+
+**Recommandation : sync pour le parsing, async pour le fetch.**
+
+Le parsing de fichiers texte est CPU-bound et se prête mal à l'async. Par contre, le téléchargement HTTP bénéficie de l'async.
+
+```
+┌─────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
+│  CLI    │────▶│  Fetch   │────▶│  Parse   │────▶│   DB     │
+│         │     │ (async)  │     │ (sync)   │     │ (sync)   │
+└─────────┘     └──────────┘     └──────────┘     └──────────┘
+                      │                │                │
+                      ▼                ▼                ▼
+                 raw/2026-05/      rejects/         bdpm.db
+```
+
+### 6.4 Configuration (`bdpm.toml`)
+
+```toml
+[source]
+url = "https://base-donnees-publique.medicaments.gouv.fr/telechargement"
+user_agent = "BDPM-Pipeline/1.0 (contact@example.com)"
+request_timeout_sec = 60
+retry_max = 3
+retry_backoff_sec = 5
+
+[fetch]
+check_interval_hours = 24  # Fréquence de vérification
+download_dir = "data/raw"
+
+[parse]
+encoding_fallback = "windows-1252"
+date_format_primary = "%d/%m/%Y"
+date_format_secondary = "%Y%m%d"
+decimal_separator = ","
+
+[database]
+path = "data/processed/bdpm.db"
+batch_size = 1000
+
+[validation]
+strict_mode = true  # Rejette les lignes invalides
+log_rejects = true
+```
+
+---
+
+## 7. Priorités de mise en œuvre (ordre recommandé)
+
+### Phase 1 : Fondations (1-2 semaines)
+1. **Créer le crate `bdpm-core`** avec les structures de données (structs `Specialite`, `Presentation`, etc.)
+2. **Implémenter le fetch** : téléchargement de la page HTML, extraction des dates, téléchargement conditionnel des fichiers
+3. **Stocker les artefacts bruts** avec hash et manifest
+
+### Phase 2 : Parsing et validation (2-3 semaines)
+4. **Implémenter le décodage** avec détection d'encodage
+5. **Parser un fichier pilote** : commencer par `CIS_bdpm.txt` (le plus simple, 11 colonnes)
+6. **Ajouter la validation ligne par ligne** (nombre de colonnes, formats)
+7. **Logger les rejects** dans un fichier séparé pour analyse manuelle
+
+### Phase 3 : Base de données (1-2 semaines)
+8. **Créer le schéma SQLite** avec `sqlx migrate`
+9. **Importer `CIS_bdpm.txt`** dans SQLite
+10. **Ajouter les fichiers un par un** : CIP, composition, HAS, etc.
+11. **Implémenter les contrôles relationnels** (FK, intégrité référentielle)
+
+### Phase 4 : Automatisation et robustesse (1-2 semaines)
+12. **Commande `update`** : check → download → parse → load en une seule commande
+13. **Mode incrémental** : ne recharger que les fichiers modifiés
+14. **Tests d'intégration** : téléchargement réel + parsing complet + assertions sur les données
+
+### Phase 5 : API et exposition (futur)
+15. **Crate `bdpm-api`** : couche de requêtage SQLite (recherche par nom, substance, CIP)
+16. **Export JSON/CSV** pour consommation externe
+
+---
+
+## 8. Points à valider par des tests ou observations supplémentaires
+
+### 8.1 À tester immédiatement (avant d'écrire du Rust)
+
+| Test | Méthode | Objectif |
+|---|---|---|
+| **Encodage réel** | Télécharger `CIS_bdpm.txt`, ouvrir avec `file -i` et `hexdump` | Confirmer Windows-1252 vs UTF-8 |
+| **Structure TSV** | `head -n 5 CIS_bdpm.txt \| cat -A` | Voir les tabulations (`^I`) et CRLF (`^M$`) |
+| **Lignes malformées** | `awk -F'\t' '{print NF}' CIS_bdpm.txt \| sort \| uniq -c` | Vérifier la constance du nombre de colonnes |
+| **Dates par fichier** | Parser la page HTML avec un script Python rapide | Vérifier que les dates sont bien exploitables |
+| **Fichier infos importantes** | Vérifier le pattern du nom de fichier | Confirmer le format `CIS_InfoImportantes_YYYYMMDDhhmmss_bdpm.txt` |
+| **Téléchargement direct** | Tester `curl -I` sur les URLs de fichiers | Vérifier les headers HTTP (Content-Length, Last-Modified) |
+
+### 8.2 Hypothèses à vérifier
+
+1. **Les URLs de téléchargement direct sont stables ?**  
+   → Il faut parser la page HTML pour extraire les liens `<a href="...">` plutôt que hardcoder des URLs.
+
+2. **Le séparateur est bien une tabulation pure (`\t`) et pas un mélange ?**  
+   → À vérifier avec `cat -A` sur un échantillon.
+
+3. **Les champs texte ne contiennent jamais de tabulations internes ?**  
+   → Si c'est le cas, le parsing TSV standard échouera. Il faudra un escape strategy.
+
+4. **Le nombre de colonnes est constant dans chaque fichier ?**  
+   → Certains fichiers gouvernementaux ont des lignes de commentaires ou des lignes vides à la fin.
+
+5. **Le fichier des disponibilités (`CIS_CIP_Dispo_Spec.txt`) a-t-il toujours un CIP13 ?**  
+   → La doc dit "cette colonne ne sera pas renseignée si toutes les présentations sont concernées". À vérifier.
+
+### 8.3 Script de validation rapide (Python)
+
+Je te recommande de commencer par ce script pour valider les hypothèses avant d'investir dans Rust :
+
+```python
+import requests
+import hashlib
+from pathlib import Path
+
+URL = "https://base-donnees-publique.medicaments.gouv.fr/telechargement"
+HEADERS = {"User-Agent": "BDPM-Validator/1.0"}
+
+resp = requests.get(URL, headers=HEADERS, timeout=30)
+# Extraire les liens, télécharger un fichier, analyser l'encodage
+# avec chardet, compter les colonnes, etc.
+```
+
+---
+
+## 9. Comparaison des approches possibles
+
+| Approche | Avantages | Inconvénients | Recommandation |
+|---|---|---|---|
+| **A. Pipeline Rust complet** | Performance, type safety, maintenable | Courbe d'apprentissage, plus long à développer | ✅ **Recommandé** pour la production |
+| **B. Script Python + SQLite** | Rapide à prototyper, riche écosystème CSV | Moins performant, moins robuste à long terme | ✅ Pour la phase de validation initiale |
+| **C. API data.gouv.fr** | Pas de parsing à gérer | Dépendance externe, pas de garantie de fraîcheur, rate limiting | ❌ Non fiable pour usage médical |
+| **D. Docker + cron mensuel** | Automatisation simple | Overhead Docker inutile pour un outil CLI | ⚠️ Optionnel, pas prioritaire |
+
+**Stratégie hybride recommandée :**
+- Phase 0 (maintenant) : script Python rapide pour valider encodage, structure, dates
+- Phase 1+ : implémentation Rust complète avec les apprentissages du script Python
+
+---
+
+## 10. Risques et angles morts
+
+| Risque | Probabilité | Impact | Mitigation |
+|---|---|---|---|
+| Changement de format par l'ANSM | Moyenne | Élevé | Versionner le parser, tests d'intégration, monitoring des rejects |
+| Indisponibilité du site | Faible | Moyen | Retry, cache local, alerte si échec après N tentatives |
+| Erreur d'encodage non détectée | Moyenne | Élevé | Détection automatique + fallback + log |
+| Ligne malformée silencieusement ignorée | Moyenne | Élevé | Validation stricte, fichier de rejects, métriques |
+| Évolution du schéma (nouvelle colonne) | Moyenne | Moyen | Parser tolérant (ignorer colonnes supplémentaires avec warning) |
+| Fichier infos importantes non détecté | Faible | Moyen | Parser la page HTML pour trouver le lien dynamique |
+
+---
+
+## Résumé exécutif
+
+La BDPM est une source **structurée, documentée et stable**, mais avec des quirks classiques des exports gouvernementaux : encodage Windows, pas d'en-têtes, séparateur tabulation, dates inconsistants, et un fichier généré dynamiquement. Il n'y a **pas d'API REST** — le téléchargement de fichiers plats est la seule voie.
+
+**La stratégie la plus robuste** consiste à :
+1. Parser la page HTML pour détecter les mises à jour (dates affichées)
+2. Télécharger conditionnellement avec un user-agent explicite et du rate-limiting
+3. Décoder avec fallback UTF-8 → Windows-1252
+4. Parser avec un crate CSV/TSV mature (pas de `split('\t')` naïf)
+5. Valider strictement chaque ligne (nombre de colonnes, formats, cohérence)
+6. Logger les rejects pour audit
+7. Charger en SQLite avec contraintes d'intégrité référentielle
+8. Versionner le schéma et les parsers pour gérer les évolutions futures
+
+**Prochaine étape immédiate** : exécuter le script de validation Python pour confirmer l'encodage, la structure exacte des tabulations, et l'exploitabilité des dates sur la page HTML. Une fois ces hypothèses validées, le développement Rust peut commencer avec un haut niveau de confiance.

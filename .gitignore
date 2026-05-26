@@ -1,0 +1,13 @@
+/target/
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.tmp
+.env
+.DS_Store
+.vscode/
+.idea/
+*.swp
+import_state.json
+data/

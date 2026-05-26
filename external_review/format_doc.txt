@@ -1,0 +1,305 @@
+         Contenu et format des fichiers téléchargeables de la
+            base de données publique des médicaments
+
+
+
+
+Base de données publique des médicaments
+
+Date de mise à jour : 27/08/2025
+Table des matières :
+
+1.  Présentation générale .......................................................................................................... 3
+2.  Généralités .......................................................................................................................... 3
+3.  Description des fichiers disponibles ................................................................................... 3
+  3.1. Fichier des spécialités .................................................................................................. 3
+  3.2. Fichier des présentations ............................................................................................. 4
+  3.3. Fichier des compositions ............................................................................................. 4
+  3.4. Fichier des avis SMR de la HAS ................................................................................. 4
+  3.5. Fichier des avis ASMR de la HAS .............................................................................. 5
+  3.6. Fichier des liens vers les avis de la commission de la transparence (CT) de la HAS . 5
+  3.7. Fichier des groupes génériques.................................................................................... 5
+  3.8. Fichier des conditions de prescription et de délivrance ............................................... 6
+  3.9. Fichier des informations importantes .......................................................................... 6
+  3.10.   Fichier des fiches « Disponibilité des spécialités pharmaceutiques » ..................... 6
+4. Comment lier les fichiers entre eux ? ................................................................................. 8
+1.       Présentation générale
+
+Ce document récapitule la liste des fichiers téléchargeables dans la base de données publique
+des médicaments (BDPM).
+
+Il précise aussi pour chacun de ces fichiers son contenu et le format de mise à disposition des
+données.
+
+
+2.       Généralités
+
+Le format des fichiers est le même pour tous : il s’agit de fichiers txt, les valeurs étant
+séparées par des tabulations.
+
+Il n'y a pas de délimiteurs de champs.
+
+Il n’y a pas d’en-tête de fichier, la première ligne rencontrée dans chaque fichier est une ligne
+de données.
+
+
+
+3.       Description des fichiers disponibles
+
+     3.1. Fichier des spécialités
+
+Le nom de ce fichier est : CIS_bdpm.txt
+Il contient la liste des médicaments commercialisés ou en arrêt de commercialisation depuis
+moins de deux ans.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS (Code Identifiant de Spécialité)
+   - Dénomination du médicament
+   - Forme pharmaceutique
+   - Voies d'administration (avec un séparateur « ; » entre chaque valeur quand il y en a
+       plusieurs)
+   - Statut administratif de l’autorisation de mise sur le marché (AMM)
+   - Type de procédure d'autorisation de mise sur le marché (AMM)
+   - Etat de commercialisation
+   - Date d’AMM (format JJ/MM/AAAA)
+   - StatutBdm : valeurs possibles : « Alerte » (icône rouge) ou « Warning disponibilité »
+       (icône grise)
+   - Numéro de l’autorisation européenne
+   - Titulaire(s) : S’il y a plusieurs titulaires, les valeurs seront séparées par des « ; »
+   - Surveillance renforcée (triangle noir) : valeurs « Oui » ou « Non »
+   3.2. Fichier des présentations
+
+Le nom de ce fichier est : CIS_CIP_bdpm.txt
+Il contient la liste des présentations (boîtes de médicaments) disponibles pour les
+médicaments présents dans le fichier décrit dans le paragraphe 3.1.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS
+   - Code CIP7 (Code Identifiant de Présentation à 7 chiffres)
+   - Libellé de la présentation
+   - Statut administratif de la présentation
+   - Etat de commercialisation de la présentation tel que déclaré par le titulaire de l'AMM
+   - Date de la déclaration de commercialisation (format JJ/MM/AAAA)
+   - Code CIP13 (Code Identifiant de Présentation à 13 chiffres)
+   - Agrément aux collectivités ("oui", "non" ou « inconnu »)
+   - Taux de remboursement (avec un séparateur « ; » entre chaque valeur quand il y en a
+       plusieurs)
+   - Prix du médicament en euro
+   - Prix public France en euro
+   - Honoraires de dispensation en euro
+   - Texte présentant les indications ouvrant droit au remboursement par l’assurance
+       maladie s’il y a plusieurs taux de remboursement pour la même présentation.
+
+
+   3.3. Fichier des compositions
+
+Le nom de ce fichier est : CIS_COMPO_bdpm.txt
+Il contient la composition qualitative et quantitative en substances actives et fractions
+thérapeutiques (telle que figurant dans le Résumé des Caractéristiques du Produit) des
+médicaments de la BDPM.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS
+   - Désignation de l'élément pharmaceutique
+   - Code de la substance
+   - Dénomination de la substance
+   - Dosage de la substance
+   - Référence de ce dosage (exemple : "[pour] un comprimé")
+   - Nature du composant (principe actif : « SA » ou fraction thérapeutique : « ST »)
+   - Numéro permettant de lier, le cas échéant, substances actives et fractions
+       thérapeutiques
+
+
+   3.4. Fichier des avis SMR de la HAS
+
+Le nom de ce fichier est : CIS_HAS_SMR_bdpm.txt
+Il contient l’ensemble des avis de SMR de la HAS postérieurs à l’année 2002.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   -   Code CIS
+   -   Code de dossier HAS
+   -   Motif d’évaluation
+   -   Date de l’avis de la Commission de la transparence (format AAAAMMJJ)
+   -   Valeur du SMR
+   -   Libellé du SMR
+
+
+   3.5. Fichier des avis ASMR de la HAS
+
+Le nom de ce fichier est : CIS_HAS_ASMR_bdpm.txt
+Il contient l’ensemble des avis d’ASMR de la HAS postérieurs à l’année 2002.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS
+   - Code de dossier HAS
+   - Motif d’évaluation
+   - Date de l’avis de la Commission de la transparence (format AAAAMMJJ)
+   - Valeur de l’ASMR
+   - Libellé de l’ASMR
+
+
+   3.6. Fichier des liens vers les avis de la commission de la transparence (CT) de la HAS
+
+Le nom de ce fichier est : HAS_LiensPageCT_bdpm.txt
+Il contient l’ensemble des liens permettant d’accéder aux avis complets de la commission de
+la transparence pour les SMR et ASMR postérieurs à l’année 2002.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code de dossier HAS
+   - Lien vers les pages d’avis de la CT
+
+
+   3.7. Fichier des groupes génériques
+
+Le nom de ce fichier est : CIS_GENER_bdpm.txt
+Il contient l’ensemble groupes génériques, avec les médicaments en faisant partie.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Identifiant du groupe générique
+   - Libellé du groupe générique
+   - Code CIS
+   - Type de générique, avec les valeurs suivantes :
+          o 0 : « princeps »
+          o 1 : « générique »
+          o 2 : « génériques par complémentarité posologique »
+          o 4 : « générique substituable »
+   - Numéro permettant de trier les éléments d’un groupe
+   3.8. Fichier des conditions de prescription et de délivrance
+
+Le nom de ce fichier est : CIS_CPD_bdpm.txt
+Il contient l’ensemble des conditions de prescription et de délivrance associées à un
+médicament.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS
+   - Condition de prescription ou de délivrance
+
+
+   3.9. Fichier des informations importantes
+
+Le nom de ce fichier est : CIS_InfoImportantes_AAAAMMJJhhmiss_bdpm.txt
+On ajoute la date de génération au nom de ce fichier car, contrairement aux autres fichiers,
+celui-ci est généré en direct.
+Il contient l’ensemble des informations importantes disponibles pour les médicaments de la
+base de données publique des médicaments.
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS
+   - Date de début de l’information de sécurité (format JJ/MM/AAAA)
+   - Date de fin de l’information de sécurité (format JJ/MM/AAAA)
+   - Texte à afficher et lien vers l’information de sécurité
+
+
+   3.10. Fichier des fiches « Disponibilité des spécialités pharmaceutiques »
+
+Le nom de ce fichier est : CIS_CIP_Dispo_Spec.txt
+
+Ce fichier contient les spécialités pharmaceutiques pour lesquelles l'ANSM a publié sur son
+site Internet dans la rubrique « Disponibilité des produits de santé » une information dans les
+sous rubriques « Médicament » et « Vaccins ».
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS (Code Identifiant de Spécialité)
+   - Code CIP13 (Code Identifiant de Présentation à 13 chiffres) : Cette colonne ne
+       sera pas renseignée si toutes les présentations commercialisées d’une spécialité
+       pharmaceutique sont concernées.
+   - Code statut, avec les valeurs suivantes :
+           o 1 : « Rupture de stock »
+           o 2 : « Tension d'approvisionnement »
+           o 3 : « Arrêt de commercialisation »
+           o 4 : « Remise à disposition »
+   - Libellé du statut, selon les valeurs précédentes.
+   -   Date de début (format JJ/MM/AAAA) : Cette date correspond à la date du début du
+       statut. Pour les fiches antérieures au 06/10/2023 : la date sera celle de la mise à jour et
+       non celle du début.
+   -   Date de mise à jour (format JJ/MM/AAAA) : Cette date correspond à la date de mise à
+       jour sur le site de l’ANSM de la fiche.
+   -   Date de remise à disposition (format JJ/MM/AAAA).
+   -   Lien vers page du site ANSM.
+
+
+   3.11. Liste des médicaments d’intérêt thérapeutique majeur
+
+Le nom de ce fichier est : CIS_MITM.txt
+
+Ce fichier contient les spécialités pharmaceutiques publiées par l’ANSM sur son site Internet
+dans la rubrique « xxx ».
+
+Les éléments mis à disposition dans ce fichier sont les suivants :
+   - Code CIS (Code Identifiant de Spécialité)
+   - Code ATC : yyy
+   - Dénomination : Dénomination du médicament.
+   - Lien BDPM : Lien (URL) vers la fiche de la spécialité sur la BDPM.
+Comment lier les fichiers entre eux ?
+
+Pour obtenir un ensemble cohérent à partir des données contenues dans les fichiers présentés
+plus haut, on utilise des clés permettant de regrouper les données entre elles.
+
+L’élément central permettant de décrire le médicament est le code CIS, présent dans la plupart
+des fichiers. Une seule exception : le fichier des liens vers les avis de la commission de la
+transparence de la HAS. Ce fichier est lié aux fichiers de SMR et d’ASMR par la clef « Code
+de dossier HAS ».
+
+On peut donc représenter ainsi la hiérarchie des fichiers, avec en gras la clé utilisée :
+
+-   CIS_bdpm.txt
+       o CIS_CIP_bdpm.txt
+       o CIS_COMPO_bdpm.txt
+       o CIS_HAS_SMR_bdpm.txt
+             HAS_LiensPageCT_bdpm.txt
+       o CIS_HAS_ASMR_bdpm.txt
+             HAS_LiensPageCT_bdpm.txt
+       o CIS_GENER_bdpm.txt
+       o CIS_CPD_bdpm.txt
+       o CIS_InfoImportantes_AAAAMMJJhhmiss_bdpm.txt
+       o CIS_CIP_Dispo_Spec.txt
+       o CIS_MITM.txt
+                      CIS_CIP_bdpm                                          CIS_COMPO_bdpm
+
+Code CIS                                                  Code CIS
+Code CIP7                                                 Désignation de l'élément pharmaceutique
+Libellé de la présentation                                Code de la substance
+Statut administratif de la présentation                   Dénomination de la substance
+Etat de commercialisation                                 Dosage de la substance
+Date de la déclaration de commercialisation               Référence de ce dosage
+Code CIP13                                                Nature du composant
+Agrément aux collectivités                                Numéro de liaison SA/FT
+Taux de remboursement
+Prix du médicament en euro
+Indications ouvrant droit au remboursement
+                                                                                                                              CIS_CPD_bdpm
+
+CIS_InfoImportantes_AAAAMMJJhhmiss_bdpm                                           CIS_bdpm                     Code CIS
+                                                                                                               Condition de prescription ou de délivrance
+Code CIS                                                  Code CIS
+Date de début de l’information de sécurité                Dénomination du médicament
+Date de fin de l’information de sécurité                  Forme pharmaceutique
+Texte à afficher et lien vers l’information de sécurité   Voies d'administration                                              CIS_HAS_SMR
+                                                          Statut administratif de l’AMM
+                                                          Type de procédure d'AMM
+                                                          Etat de commercialisation                            Code CIS
+                 CIS_CIP_Dispo_Spec
+                                                          Date d’AMM (format JJ/MM/AAAA)                       Code de dossier HAS
+                                                          StatutBdm : «Alerte»/ «disponibilité »               Motif d’évaluation
+Code CIS                                                  Numéro de l’autorisation européenne                  Date de l’avis de la Commission de la transparence
+Code CIP7                                                 Titulaire(s)                                         Valeur du SMR
+CodeStatut                                                Surveillance renforcée (triangle noir) Oui/Non       Libelle du SMR
+DateDebut
+DateMiseAJour
+DateRemiseDispo
+Lien vers la page du site ANSM
+                                                                              CIS_HAS_ASMR                     HAS_LiensPageCT_bdpm
+
+                                                          Code CIS                                             Code de dossier HAS
+                   CIS_GENER_bdpm                         Code de dossier HAS                                  Lien vers les pages d’avis de la CT
+                                                          Motif d’évaluation
+                                                          Date de l’avis de la Commission de la transparence
+Identifiant du groupe générique                           Valeur de l'ASMR
+Libellé du groupe générique                               Libelle de l'ASMR
+Code CIS
+Type de générique
+Numéro de tri
+
+
+                                                               Modèle des données de la BDPM
+
