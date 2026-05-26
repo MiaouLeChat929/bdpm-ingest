@@ -3,13 +3,13 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tokio::task::spawn_blocking;
 
-pub mod drugs;
-pub mod groups;
-pub mod search;
 pub mod atc;
 pub mod availability;
+pub mod drugs;
+pub mod groups;
 pub mod openapi;
 pub mod safety;
+pub mod search;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -23,10 +23,10 @@ pub struct HealthResponse {
     drug_count: i64,
 }
 
-/// Start the axum HTTP server on the given address.
-pub async fn run_server(addr: &str, db_path: PathBuf) {
+/// Build the axum Router with all routes. Used by both run_server and tests.
+pub fn build_app(db_path: PathBuf) -> Router {
     let state = AppState { db_path };
-    let app = Router::new()
+    Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(openapi::openapi_json))
         .route("/openapi.yaml", get(openapi::openapi_yaml))
@@ -38,8 +38,12 @@ pub async fn run_server(addr: &str, db_path: PathBuf) {
         .route("/atc", get(atc::atc_top_level))
         .route("/atc/{code}", get(atc::atc_detail))
         .route("/availability", get(availability::availability))
-        .with_state(state);
+        .with_state(state)
+}
 
+/// Start the axum HTTP server on the given address.
+pub async fn run_server(addr: &str, db_path: PathBuf) {
+    let app = build_app(db_path);
     let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind address");
     axum::serve(listener, app).await.expect("Server error");
 }

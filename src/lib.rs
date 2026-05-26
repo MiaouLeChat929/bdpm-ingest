@@ -8,4 +8,4 @@ pub mod import;
 pub mod normalize;
 pub mod parse;
 
-pub use api::{run_server, AppState};
+pub use api::{run_server, AppState, build_app};
