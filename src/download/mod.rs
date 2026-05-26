@@ -8,4 +8,4 @@ pub use fetcher::Fetcher;
 pub use listing::{fetch_listing_dates, diff_listing_dates, ListingDates};
 
 pub const BDPM_URL: &str =
-    "https://base-donnees-publique.medicaments.gouv.fr/telechargement/download/file";
+    "https://base-donnees-publique.medicaments.gouv.fr";

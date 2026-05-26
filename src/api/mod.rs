@@ -65,7 +65,7 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
 
         let last_import = conn
             .query_row(
-                "SELECT ended_at FROM import_log WHERE status = 'success' ORDER BY ended_at DESC LIMIT 1",
+                "SELECT imported_at FROM import_log WHERE status = 'success' ORDER BY imported_at DESC LIMIT 1",
                 [],
                 |row| row.get::<_, String>(0),
             )

@@ -229,12 +229,110 @@ fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
     }
 }
 
-/// Apply apostrophe normalization to all string fields in a row
 #[allow(clippy::manual_flatten)]
 pub fn normalize_apostrophes(row: &mut NormalizedRow) {
     for val in &mut row.values {
         if let Some(s) = val {
             *s = s.replace(['\u{2019}', '\u{2018}'], "'");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_row(cis: &str, substance_code: &str, dosage: &str) -> NormalizedRow {
+        NormalizedRow {
+            table: "compositions",
+            values: vec![
+                Some(cis.to_string()),
+                Some("form".to_string()),
+                Some(substance_code.to_string()),
+                Some("name".to_string()),
+                Some(dosage.to_string()),
+                Some("unit".to_string()),
+                Some("SA".to_string()),
+                Some("0".to_string()),
+            ],
+        }
+    }
+
+    // --- normalize_apostrophes ---
+
+    #[test]
+    fn test_apostrophes_replaced() {
+        let mut row = NormalizedRow {
+            table: "smr",
+            values: vec![Some("L\u{2019}important est d\u{2018}avoir".to_string())],
+        };
+        normalize_apostrophes(&mut row);
+        assert_eq!(row.values[0], Some("L'important est d'avoir".to_string()));
+    }
+
+    #[test]
+    fn test_apostrophes_no_change() {
+        let mut row = NormalizedRow {
+            table: "smr",
+            values: vec![Some("normal text".to_string())],
+        };
+        normalize_apostrophes(&mut row);
+        assert_eq!(row.values[0], Some("normal text".to_string()));
+    }
+
+    #[test]
+    fn test_apostrophes_null_field() {
+        let mut row = NormalizedRow {
+            table: "smr",
+            values: vec![None, Some("L\u{2019}important".to_string())],
+        };
+        normalize_apostrophes(&mut row);
+        assert_eq!(row.values[0], None);
+        assert_eq!(row.values[1], Some("L'important".to_string()));
+    }
+
+    // --- strip_cip7 (used in normalize_cis_cip) ---
+
+    fn strip_cip7(cip: &str) -> String {
+        let t = cip.trim();
+        if t.len() == 13 && t.starts_with("34009") {
+            t[6..].to_string()
+        } else {
+            t.to_string()
+        }
+    }
+
+    #[test]
+    fn test_strip_cip7_13_digit() {
+        // 13-digit EAN with 34009 prefix → 7-digit CIP from position 6
+        assert_eq!(strip_cip7("3400930000017"), "0000017");
+    }
+
+    #[test]
+    fn test_strip_cip7_7_digit() {
+        assert_eq!(strip_cip7("3000001"), "3000001");
+    }
+
+    #[test]
+    fn test_strip_cip7_other() {
+        assert_eq!(strip_cip7("1234567890"), "1234567890");
+        assert_eq!(strip_cip7(""), "");
+    }
+
+    // --- normalize_spaces ---
+
+    #[test]
+    fn test_normalize_spaces_double() {
+        assert_eq!(normalize_spaces("PARACETAMOL  1000  mg"), "PARACETAMOL 1000 mg");
+    }
+
+    #[test]
+    fn test_normalize_spaces_leading_trailing() {
+        assert_eq!(normalize_spaces("  hello  world  "), "hello world");
+    }
+
+    #[test]
+    fn test_normalize_spaces_empty() {
+        assert_eq!(normalize_spaces(""), "");
     }
 }

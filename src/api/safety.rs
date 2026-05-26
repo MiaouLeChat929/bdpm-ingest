@@ -56,13 +56,13 @@ pub async fn drug_safety(
         let conn = Connection::open(&db_path).ok()?;
 
         // Verify CIS exists
-        let exists: bool = conn.query_row(
+        let cis_exists: bool = conn.query_row(
             "SELECT 1 FROM drugs WHERE cis = ?1 LIMIT 1",
             [&cis_owned],
             |_| Ok(true),
-        ).ok()?;
+        ).unwrap_or(false);
 
-        if !exists {
+        if !cis_exists {
             return None;
         }
 

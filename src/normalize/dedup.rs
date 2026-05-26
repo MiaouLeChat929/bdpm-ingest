@@ -20,3 +20,118 @@ pub fn dedup_compo(rows: Vec<NormalizedRow>) -> Vec<NormalizedRow> {
         seen.insert(key)
     }).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_row(cis: &str, substance_code: &str, dosage: &str) -> NormalizedRow {
+        NormalizedRow {
+            table: "compositions",
+            values: vec![
+                Some(cis.to_string()),
+                Some("form".to_string()),
+                Some(substance_code.to_string()),
+                Some("name".to_string()),
+                Some(dosage.to_string()),
+                Some("unit".to_string()),
+                Some("SA".to_string()),
+                Some("0".to_string()),
+            ],
+        }
+    }
+
+    fn make_short_row() -> NormalizedRow {
+        NormalizedRow {
+            table: "compositions",
+            values: vec![
+                Some("60004971".to_string()),
+                Some("form".to_string()),
+            ],
+        }
+    }
+
+    #[test]
+    fn test_dedup_all_unique() {
+        let rows = vec![
+            make_row("60004971", "42215", "1000 mg"),
+            make_row("60004971", "42216", "500 mg"),
+            make_row("60004972", "42215", "1000 mg"),
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_dedup_all_duplicates() {
+        let rows = vec![
+            make_row("60004971", "42215", "1000 mg"),
+            make_row("60004971", "42215", "1000 mg"),
+            make_row("60004971", "42215", "1000 mg"),
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_dedup_mixed() {
+        let rows = vec![
+            make_row("60004971", "42215", "1000 mg"),
+            make_row("60004971", "42215", "1000 mg"), // dup
+            make_row("60004971", "42216", "500 mg"),  // unique
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_dedup_empty() {
+        let rows: Vec<NormalizedRow> = vec![];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_dedup_short_rows_preserved() {
+        let rows = vec![
+            make_short_row(),
+            make_row("60004971", "42215", "1000 mg"),
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 2); // short row kept + normal row
+    }
+
+    #[test]
+    fn test_dedup_null_dosage() {
+        let rows = vec![
+            NormalizedRow {
+                table: "compositions",
+                values: vec![
+                    Some("60004971".to_string()),
+                    Some("form".to_string()),
+                    Some("42215".to_string()),
+                    Some("name".to_string()),
+                    None, // null dosage
+                    Some("unit".to_string()),
+                    Some("SA".to_string()),
+                    Some("0".to_string()),
+                ],
+            },
+            NormalizedRow {
+                table: "compositions",
+                values: vec![
+                    Some("60004971".to_string()),
+                    Some("form".to_string()),
+                    Some("42215".to_string()),
+                    Some("name".to_string()),
+                    None, // same null dosage → duplicate
+                    Some("unit".to_string()),
+                    Some("SA".to_string()),
+                    Some("0".to_string()),
+                ],
+            },
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 1); // null dosage treated as "" → duplicate
+    }
+}

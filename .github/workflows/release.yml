@@ -197,13 +197,13 @@ jobs:
             EXT=""
           fi
           TARGET="${{ matrix.target }}"
-          ARTIFACT="bdmp-ingest-${TARGET}${EXT}"
-          cp "target/${TARGET}/release/bdmp-ingest${EXT}" "${ARTIFACT}"
+          ARTIFACT="bdpm-ingest-${TARGET}${EXT}"
+          cp "target/${TARGET}/release/bdpm-ingest${EXT}" "${ARTIFACT}"
           echo "${ARTIFACT}" >> artifacts.txt
           sha256sum "${ARTIFACT}" > "${ARTIFACT}.sha256"
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bdmp-ingest-${{ matrix.target }}*
+            bdpm-ingest-${{ matrix.target }}*
           generate_release_notes: true
