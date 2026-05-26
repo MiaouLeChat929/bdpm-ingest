@@ -291,6 +291,24 @@ fn import_file(
 
         drop(stmt);
         tx.commit()?;
+
+        // Post-import: flag orphan rows (withdrawn drugs not in drugs table)
+        // BRIEF.md: 2,806 SMR / 1,567 ASMR / 2,503 GENER orphan rows expected
+        if matches!(file, BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm | BDPMFile::CIS_GENER_bdpm) {
+            let orphan_count: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE cis NOT IN (SELECT cis FROM drugs)"),
+                [],
+                |row| row.get(0),
+            ).unwrap_or(0);
+            if orphan_count > 0 {
+                conn.execute(
+                    &format!("UPDATE {table} SET is_orphan = 1 WHERE cis NOT IN (SELECT cis FROM drugs)"),
+                    [],
+                )?;
+                tracing::info!("{table}: flagged {} orphan rows", orphan_count);
+            }
+        }
+
         Ok(stats)
     })();
 
@@ -336,7 +354,7 @@ fn insert_sql(file: BDPMFile) -> String {
         }
         BDPMFile::CIS_MITM => {
             "INSERT OR IGNORE INTO mitm (cis, atc_code, detail_url)
-             VALUES (?1,?2,?4)".into()
+             VALUES (?1,?2,?3)".into()
         }
         BDPMFile::HAS_LiensPageCT_bdpm => {
             "INSERT OR IGNORE INTO has_links (ct_id, url)

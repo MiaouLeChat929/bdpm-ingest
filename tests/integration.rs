@@ -764,3 +764,48 @@ fn safety_alerts_cis_fk_to_drugs() {
 
     assert_eq!(orphan_count, 0, "Found safety_alerts with CIS not in drugs");
 }
+
+// =============================================================================
+// ORPHAN FLAGGING (is_orphan column)
+// =============================================================================
+
+#[test]
+fn smr_orphan_flag_exists() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    // is_orphan column should exist in smr table
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('smr') WHERE name = 'is_orphan'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    assert_eq!(count, 1, "smr table should have is_orphan column");
+}
+
+#[test]
+fn asmr_orphan_flag_exists() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('asmr') WHERE name = 'is_orphan'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    assert_eq!(count, 1, "asmr table should have is_orphan column");
+}

@@ -1,4 +1,4 @@
-name: Weekly Dispo Update
+name: Weekly Dispo Sync
 
 on:
   schedule:
@@ -7,8 +7,10 @@ on:
 
 jobs:
   sync-dispo:
-    name: Update Availability/Stockout Data
+    name: Sync Availability Data
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -16,8 +18,13 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bdpm-${{ runner.os }}"
+          cache-on-failure: true
+
       - name: Build release binary
         run: cargo build --release
 
       - name: Sync availability data
-        run: ./target/release/bdpm-ingest import --file CIS_CIP_Dispo_Spec.txt --data-dir data
+        run: ./target/release/bdpm-ingest dispo --data-dir data

@@ -6,7 +6,7 @@ pub mod dedup;
 
 pub use price::parse_price_cents;
 pub use date::{parse_date_ddmmYYYY, parse_date_YYYYMMDD};
-pub use fields::{strip_field, normalize_generic_type};
+pub use fields::{strip_field, normalize_generic_type, normalize_spaces};
 pub use html::strip_avis_html;
 pub use dedup::dedup_compo;
 
@@ -43,14 +43,14 @@ fn normalize_cis_bdpm(f: &[String]) -> NormalizedRow {
         table: "drugs",
         values: vec![
             Some(f[0].clone()),  // cis
-            Some(strip_field(&f[1])),  // name (strip leading space)
+            Some(normalize_spaces(&strip_field(&f[1]))),  // name (strip + normalize double-spaces)
             Some(strip_field(&f[2])),  // form
             Some(strip_field(&f[3])),  // route
             Some(strip_field(&f[4])),  // auth_status
             Some(strip_field(&f[5])),  // procedure_type
             Some(strip_field(&f[6])),  // comm_status
             parse_date_ddmmYYYY(&f[7]).ok(),  // auth_date ISO
-            Some(strip_field(&f[9])),  // lab_name (strip leading space)
+            Some(normalize_spaces(&strip_field(&f[9]))),  // lab_name (strip + normalize double-spaces)
             Some(if f[10].trim() == "Oui" { "1" } else { "0" }.to_string()),  // is_patent
             if f[11].is_empty() { None } else { Some(strip_field(&f[11])) },  // alert_type
             Some(strip_eu_slash(&f[11])),  // eu_number (field 11)
@@ -153,7 +153,7 @@ fn normalize_gener(f: &[String]) -> NormalizedRow {
         table: "generic_groups",
         values: vec![
             Some(f[0].clone()),
-            Some(strip_field(&f[1])),
+            Some(normalize_spaces(&strip_field(&f[1]))), // group_name (strip + normalize double-spaces)
             Some(f[2].clone()),
             Some(normalize_generic_type(&f[3]).to_string()),
             f[4].parse::<i32>().ok().map(|n| n.to_string()),
