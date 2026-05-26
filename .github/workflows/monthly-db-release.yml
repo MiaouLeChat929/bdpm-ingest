@@ -1,0 +1,99 @@
+name: Monthly BDPM Database Rebuild
+
+on:
+  schedule:
+    # Run on the 1st of each month at 02:00 UTC (BDPM typically updates ~28th)
+    - cron: '0 2 1 * *'
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: Build & Release Updated Database
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_LTO: true
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bdpm-monthly-${{ runner.os }}"
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Fetch BDPM data and build database
+        run: |
+          mkdir -p data/raw
+          # Force full re-import on scheduled runs to get latest data
+          ./target/release/bdpm-ingest import --full --data-dir data
+
+      - name: WAL checkpoint (compact database)
+        run: |
+          sqlite3 data/bdpm.db "PRAGMA wal_checkpoint(TRUNCATE);"
+          sqlite3 data/bdpm.db "PRAGMA optimize;"
+          ls -lh data/bdpm.db
+
+      - name: Verify database integrity
+        run: |
+          echo "=== Database Stats ==="
+          ./target/release/bdpm-ingest stats --data-dir data
+          echo ""
+          echo "=== Import Log ==="
+          ./target/release/bdpm-ingest logs --data-dir data --limit 12
+          echo ""
+          echo "=== Integrity Check ==="
+          sqlite3 data/bdpm.db "PRAGMA integrity_check;" | head -5
+
+      - name: Generate checksum
+        run: |
+          sha256sum data/bdpm.db > bdpm.db.sha256
+          cat bdpm.db.sha256
+
+      - name: Get current month tag
+        id: date
+        run: |
+          MONTH=$(date +%Y-%m)
+          echo "tag=bdpm-${MONTH}" >> "$GITHUB_OUTPUT"
+          echo "month=${MONTH}" >> "$GITHUB_OUTPUT"
+
+      - name: Create monthly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: bdpm-${{ steps.date.outputs.month }}
+          name: "BDPM Database — ${{ steps.date.outputs.month }}"
+          body: |
+            ## Monthly BPM Database Update
+
+            **Month:** ${{ steps.date.outputs.month }}
+            **Built at:** ${{ github.event.schedule || 'manual trigger' }}
+            **Commit:** ${{ github.sha }}
+
+            ### Database
+            - `bdpm.db` — Full SQLite database with all 11 BDPM tables
+            - Fresh import from BDPM source files
+            - Optimized with `PRAGMA optimize` and WAL checkpoint (TRUNCATE)
+            - Integrity verified
+
+            ### Usage
+            ```bash
+            # Download from releases, then:
+            sqlite3 bdpm.db "SELECT COUNT(*) FROM drugs;"
+            sqlite3 bdpm.db "SELECT * FROM drugs LIMIT 5;"
+            ```
+          files: |
+            data/bdpm.db
+            bdpm.db.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

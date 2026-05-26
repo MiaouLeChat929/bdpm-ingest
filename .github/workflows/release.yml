@@ -1,14 +1,167 @@
-name: Release
+name: Build & Release BDPM Database
 
 on:
+  # Run on every push to main
   push:
-    tags:
-      - v*
+    branches: [main]
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: 'Force full re-import (ignore change detection)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
-  release:
-    name: Release ${{ matrix.target }}
+  build-database:
+    name: Build BDPM SQLite Database
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_LTO: true
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bdpm-build-${{ runner.os }}"
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run tests
+        run: |
+          cargo test --lib
+          cargo test --test integration
+
+      - name: Fetch BDPM data and build database
+        run: |
+          mkdir -p data/raw
+          if [ "${{ inputs.force_full }}" = "true" ]; then
+            echo "Force full re-import"
+            ./target/release/bdpm-ingest import --full --data-dir data
+          else
+            ./target/release/bdpm-ingest import --data-dir data
+          fi
+
+      - name: WAL checkpoint (compact database)
+        run: |
+          sqlite3 data/bdpm.db "PRAGMA wal_checkpoint(TRUNCATE);"
+          sqlite3 data/bdpm.db "PRAGMA optimize;"
+          ls -lh data/bdpm.db
+
+      - name: Verify database integrity
+        run: |
+          echo "=== Database Stats ==="
+          ./target/release/bdpm-ingest stats --data-dir data
+          echo ""
+          echo "=== Import Log ==="
+          ./target/release/bdpm-ingest logs --data-dir data --limit 5
+          echo ""
+          echo "=== Integrity Check ==="
+          sqlite3 data/bdpm.db "PRAGMA integrity_check;" | head -5
+
+      - name: Generate database checksum
+        run: |
+          sha256sum data/bdpm.db > bdpm.db.sha256
+          cat bdpm.db.sha256
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdpm-database
+          path: |
+            data/bdpm.db
+            bdpm.db.sha256
+          retention-days: 30
+
+  release-database:
+    name: Release Database
+    needs: build-database
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download database artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bdpm-database
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          # Check if a release for this commit already exists
+          COMMIT_SHA="${{ github.sha }}"
+          TAG="bdpm-${COMMIT_SHA:0:8}"
+          if gh release view "$TAG" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create or update release
+        if: steps.check_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: bdpm-${{ github.sha }}
+          name: "BDPM Database — ${{ github.event.head_commit.message }}"
+          body: |
+            ## BPM Database Release
+
+            **Built from commit:** ${{ github.sha }}
+            **Built at:** ${{ github.event.head_commit.timestamp }}
+            **Branch:** ${{ github.ref_name }}
+
+            ### Database
+            - `bdpm.db` — Full SQLite database with all 11 BDPM tables
+            - Optimized with `PRAGMA optimize` and WAL checkpoint
+            - Integrity verified
+
+            ### Checksums
+            ```
+            sha256sum bdpm.db
+            ```
+
+            ### Usage
+            ```bash
+            # Download and use
+            unzip bdpm.db.zip
+            sqlite3 bdpm.db "SELECT COUNT(*) FROM drugs;"
+            ```
+          files: |
+            bdpm.db
+            bdpm.db.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update existing release
+        if: steps.check_release.outputs.exists == 'true'
+        run: |
+          echo "Release already exists for this commit, updating assets..."
+          gh release upload "${{ steps.check_release.outputs.tag }}" bdpm.db bdpm.db.sha256 --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Also keep the binary release on version tags
+  release-binary:
+    name: Release Binary ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -48,13 +201,9 @@ jobs:
           cp "target/${TARGET}/release/bdmp-ingest${EXT}" "${ARTIFACT}"
           echo "${ARTIFACT}" >> artifacts.txt
           sha256sum "${ARTIFACT}" > "${ARTIFACT}.sha256"
-      - name: Generate SHA256SUMS
-        run: |
-          cat artifacts.txt | xargs -I{} sh -c 'cat {}.sha256'
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             bdmp-ingest-${{ matrix.target }}*
-            SHA256SUMS
           generate_release_notes: true

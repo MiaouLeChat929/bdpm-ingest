@@ -1,25 +1,28 @@
-name: Monthly Sync
+# DEPRECATED: Replaced by monthly-db-release.yml
+# This workflow is kept for reference but disabled.
+# The new workflow builds the database AND publishes it as a release asset.
+
+name: Monthly Sync (Deprecated)
 
 on:
-  schedule:
-    - cron: '0 2 1 * *'  # 1st of month at 02:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:  # Only manual trigger, no schedule
 
 jobs:
   sync:
-    name: Full Database Sync
+    name: Full Database Sync (Deprecated)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-
       - name: Build release binary
         run: cargo build --release
-
       - name: Run full import
-        run: ./target/release/bdpm-ingest import --data-dir data
-
-      # future: publish db as release asset
+        run: ./target/release/bdpm-ingest import --full --data-dir data
+      - name: WAL checkpoint
+        run: |
+          sqlite3 data/bdpm.db "PRAGMA wal_checkpoint(TRUNCATE);"
+          sqlite3 data/bdpm.db "PRAGMA optimize;"
+      - name: Show stats
+        run: ./target/release/bdpm-ingest stats --data-dir data
