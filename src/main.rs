@@ -1,19 +1,21 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
+use utoipa::OpenApi;
 
 mod api;
 mod db;
 mod download;
 mod import;
+mod sync;
 mod normalize;
 mod parse;
 
 use crate::db::init_db;
 use crate::download::{state::StateStore, Fetcher, fetch_listing_dates, diff_listing_dates, ListingDates};
-use crate::import::run_import;
 use crate::download::manifest::BDPMFile;
+use crate::sync::{run_sync, run_dispo_sync, detect_changes};
 
 fn state_path(data_dir: &PathBuf) -> PathBuf {
     data_dir.join("import_state.json")
@@ -61,6 +63,16 @@ enum Command {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
     },
+    /// Detect changed files and print a sync plan (dry run, no import).
+    Sync {
+        #[arg(long, default_value = "data")]
+        data_dir: PathBuf,
+    },
+    /// Sync only the weekly availability file (CIS_CIP_Dispo_Spec).
+    Dispo {
+        #[arg(long, default_value = "data")]
+        data_dir: PathBuf,
+    },
     /// Start the HTTP API server for drug search.
     Serve {
         #[arg(long, default_value = "127.0.0.1:8080")]
@@ -68,6 +80,8 @@ enum Command {
         #[arg(long, default_value = "data/bdpm.db")]
         db_path: PathBuf,
     },
+    /// Dump OpenAPI spec as YAML to stdout
+    DumpOpenApi,
 }
 
 fn main() -> Result<()> {
@@ -85,6 +99,13 @@ fn main() -> Result<()> {
             println!("Starting server on {}...", addr);
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(api::run_server(&addr, db_path));
+            return Ok(());
+        }
+
+        Command::DumpOpenApi => {
+            let yaml = serde_yaml::to_string(&api::openapi::ApiDoc::openapi())
+                .unwrap_or_else(|e| e.to_string());
+            println!("{}", yaml);
             return Ok(());
         }
 
@@ -129,7 +150,7 @@ fn main() -> Result<()> {
             let db_path = data_dir.join("bdpm.db");
             let mut conn = init_db(&db_path);
 
-            let report = run_import(&mut conn, &data_dir, &mut state, full, file.as_deref())?;
+            let report = run_sync(&mut conn, &data_dir, &mut state, full, file.as_deref())?;
             report.print();
 
             state.save(&state_path(&data_dir))?;
@@ -225,6 +246,43 @@ fn main() -> Result<()> {
             let fresh_state = ListingDates { dates: fresh };
             fresh_state.save(&data_dir)?;
             println!("Listing dates updated.");
+        }
+
+        Command::Sync { data_dir } => {
+            std::fs::create_dir_all(&data_dir)?;
+            std::fs::create_dir_all(data_dir.join("raw"))?;
+            let state = StateStore::load_or_create(&state_path(&data_dir))?;
+
+            let plans = detect_changes(&data_dir, &state)?;
+            if plans.is_empty() {
+                println!("No changes detected.");
+            } else {
+                println!("Sync plan ({} files):", plans.len());
+                for plan in &plans {
+                    let reason = match plan.reason {
+                        sync::ChangeReason::NewFile => "NEW",
+                        sync::ChangeReason::HashChanged => "HASH_CHANGED",
+                        sync::ChangeReason::SizeChanged => "SIZE_CHANGED",
+                    };
+                    println!("  {} {} {} bytes hash={}", reason, plan.file.filename(), plan.size, &plan.hash[..8]);
+                }
+
+                println!("\nRun 'bdpm-ingest import' to import these files.");
+            }
+        }
+
+        Command::Dispo { data_dir } => {
+            std::fs::create_dir_all(&data_dir)?;
+            std::fs::create_dir_all(data_dir.join("raw"))?;
+
+            let mut state = StateStore::load_or_create(&state_path(&data_dir))?;
+            let db_path = data_dir.join("bdpm.db");
+            let mut conn = init_db(&db_path);
+
+            let report = run_dispo_sync(&mut conn, &data_dir, &mut state)?;
+            report.print();
+
+            state.save(&state_path(&data_dir))?;
         }
     }
 

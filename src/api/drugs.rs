@@ -8,7 +8,7 @@ use axum::{
 use rusqlite::Connection;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct DrugDetail {
     pub cis: String,
     pub name: String,
@@ -24,7 +24,7 @@ pub struct DrugDetail {
     pub compositions: Vec<Composition>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct Presentation {
     pub cip: String,
     pub cip_raw: Option<String>,
@@ -37,7 +37,7 @@ pub struct Presentation {
     pub reimb_rate: Option<f32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct Composition {
     pub substance_name: String,
     pub dosage: Option<String>,
@@ -59,6 +59,18 @@ impl IntoResponse for ApiError {
 }
 
 /// GET /drugs/:cis — Return full drug detail including presentations and compositions.
+#[utoipa::path(
+    get,
+    path = "/drugs/{cis}",
+    params(
+        ("cis" = String, Path, description = "Drug CIS code")
+    ),
+    responses(
+        (status = 200, description = "Drug detail", body = DrugDetail),
+        (status = 404, description = "Drug not found")
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn drug_detail(
     Path(cis): Path<String>,
     State(state): State<AppState>,

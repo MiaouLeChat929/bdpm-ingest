@@ -3,13 +3,13 @@ use axum::{extract::{Path, State}, Json};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct AtcCode {
     pub atc_code: String,
     pub parent_1_char: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct AtcDetail {
     pub atc_code: String,
     pub parent_1_char: Option<String>,
@@ -18,6 +18,14 @@ pub struct AtcDetail {
 }
 
 /// GET /atc — top-level ATC codes (1-char chapters)
+#[utoipa::path(
+    get,
+    path = "/atc",
+    responses(
+        (status = 200, description = "Top-level ATC chapters", body = Vec<AtcCode>)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn atc_top_level(
     State(state): State<AppState>,
 ) -> Json<Vec<AtcCode>> {
@@ -35,6 +43,17 @@ pub async fn atc_top_level(
 }
 
 /// GET /atc/:code — ATC detail with child codes and drug count
+#[utoipa::path(
+    get,
+    path = "/atc/{code}",
+    params(
+        ("code" = String, Path, description = "ATC code")
+    ),
+    responses(
+        (status = 200, description = "ATC detail with children and drug count", body = AtcDetail)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn atc_detail(
     Path(code): Path<String>,
     State(state): State<AppState>,

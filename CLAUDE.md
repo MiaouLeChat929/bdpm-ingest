@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests only (22 tests in normalize, parse modules)
+# Unit tests only (24 tests in normalize, parse modules)
 cargo test --lib
 
 # All tests
@@ -27,11 +27,15 @@ Single test: `cargo test test_name_here --lib`
 
 ```bash
 ./target/release/bdpm-ingest import [--full] [--file Foo.txt]   # fetch + parse + normalize + import
-./target/release/bdpm-ingest check                                  # BLAKE3 hash all files, report changes
-./target/release/bdpm-ingest fetch                                  # download all files, print hashes
-./target/release/bdpm-ingest poll                                   # HTML listing page date parse, detect changes (no download)
-./target/release/bdpm-ingest stats                                  # row counts per table
-./target/release/bdpm-ingest logs [--limit N]                       # import history
+./target/release/bdpm-ingest sync                                # dry-run: detect changed files, print plan
+./target/release/bdpm-ingest dispo                               # sync only CIS_CIP_Dispo_Spec.txt
+./target/release/bdpm-ingest check                               # BLAKE3 hash all files, report changes
+./target/release/bdpm-ingest fetch                               # download all files, print hashes
+./target/release/bdpm-ingest poll                                # HTML listing page date parse, detect changes
+./target/release/bdpm-ingest stats                               # row counts per table
+./target/release/bdpm-ingest logs [--limit N]                    # import history
+./target/release/bdpm-ingest serve --addr 127.0.0.1:8080        # HTTP API server
+./target/release/bdpm-ingest dump-open-api                       # output OpenAPI YAML to stdout
 ```
 
 ## Architecture
@@ -45,7 +49,7 @@ download/   manifest.rs  — BDPMFile enum (10 files), Encoding, FileSchema, dow
              fetcher.rs  — ureq HTTP client, 3-retry backoff, fetch_text() for HTML
 
 parse/      tab.rs      — TabParser streaming iterator, Windows-1252/UTF-8/Latin-1 via encoding_rs, multiline record handling (SMR/ASMR avis field)
-             mod.rs     — parse_file(path, BDPMFile) → Vec<ValidatedRow>
+             mod.rs     — parse_file(path, BDPMFile) → Vec<NormalizedRow>
 
 normalize/  mod.rs     — normalize_row dispatcher per BDPMFile
              price.rs   — parse_price_cents (handles "1,466,29" → 146629, 2 commas)
@@ -56,8 +60,20 @@ normalize/  mod.rs     — normalize_row dispatcher per BDPMFile
 
 import/     mod.rs     — run_import orchestrator, insert_sql per table, ImportReport
 
+sync/       mod.rs     — SyncPlan, ChangeReason, detect_changes() [dry-run], run_sync(), run_dispo_sync()
+                         All delegate to run_import() — no logic duplication.
+
 db/        mod.rs     — init_db (WAL + FK_ON + migrations), optimize_for_bulk_insert, restore_normal_settings
+             fts.rs     — FTS5 virtual table + sync triggers
              migrations/001_initial.sql — all 11 tables + CHECK constraints
+
+api/       mod.rs     — AppState, run_server (axum), all routes wired, health endpoint (JSON: status/last_import/drug_count)
+             search.rs  — GET /drugs FTS5 search endpoint
+             drugs.rs   — GET /drugs/:cis with presentations + compositions
+             groups.rs  — GET /generic-groups, /generic-groups/:id
+             atc.rs     — GET /atc, /atc/:code (LIKE prefix for hierarchy)
+             availability.rs — GET /availability?cis=&cip=
+             openapi.rs — utoipa OpenApi struct, /openapi.json + /openapi.yaml endpoints
 ```
 
 ## Key Design Decisions

@@ -1,0 +1,23 @@
+name: Weekly Dispo Update
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Monday at 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  sync-dispo:
+    name: Update Availability/Stockout Data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Sync availability data
+        run: ./target/release/bdpm-ingest import --file CIS_CIP_Dispo_Spec.txt --data-dir data

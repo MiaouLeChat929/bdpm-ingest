@@ -2,8 +2,9 @@ use crate::api::AppState;
 use axum::{extract::{Query, State}, response::IntoResponse, Json};
 use rusqlite::{params, Connection};
 use serde::Deserialize;
+use utoipa::IntoParams;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
 pub struct SearchParams {
     pub q: String,
     #[serde(default = "default_limit")]
@@ -14,7 +15,7 @@ fn default_limit() -> usize {
     20
 }
 
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, utoipa::ToSchema, Clone)]
 pub struct DrugSearchResult {
     pub cis: String,
     pub name: String,
@@ -26,6 +27,18 @@ pub struct DrugSearchResult {
 ///
 /// Returns up to `limit` drugs matching the query string.
 /// Uses `spawn_blocking` because rusqlite is blocking, not async.
+#[utoipa::path(
+    get,
+    path = "/drugs",
+    params(
+        ("q" = String, Query, description = "Search query"),
+        ("limit" = Option<usize>, Query, description = "Max results (default 20)")
+    ),
+    responses(
+        (status = 200, description = "List of matching drugs", body = Vec<DrugSearchResult>)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn search_drugs(
     Query(params): Query<SearchParams>,
     State(state): State<AppState>,

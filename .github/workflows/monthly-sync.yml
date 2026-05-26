@@ -1,0 +1,25 @@
+name: Monthly Sync
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'  # 1st of month at 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Full Database Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run full import
+        run: ./target/release/bdpm-ingest import --data-dir data
+
+      # future: publish db as release asset

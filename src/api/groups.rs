@@ -3,14 +3,14 @@ use axum::{extract::{Path, State}, Json};
 use rusqlite::Connection;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct GenericGroupList {
     pub group_id: String,
     pub group_name: Option<String>,
     pub cis_count: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct GenericGroupMember {
     pub cis: String,
     pub name: Option<String>,
@@ -21,6 +21,14 @@ pub struct GenericGroupMember {
 }
 
 /// GET /generic-groups — list all generic groups with CIS count
+#[utoipa::path(
+    get,
+    path = "/generic-groups",
+    responses(
+        (status = 200, description = "List of generic groups", body = Vec<GenericGroupList>)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn list_generic_groups(
     State(state): State<AppState>,
 ) -> Json<Vec<GenericGroupList>> {
@@ -42,6 +50,17 @@ pub async fn list_generic_groups(
 }
 
 /// GET /generic-groups/:group_id — drugs in a specific generic group
+#[utoipa::path(
+    get,
+    path = "/generic-groups/{group_id}",
+    params(
+        ("group_id" = String, Path, description = "Generic group ID")
+    ),
+    responses(
+        (status = 200, description = "Members of the generic group", body = Vec<GenericGroupMember>)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn generic_group_detail(
     Path(group_id): Path<String>,
     State(state): State<AppState>,

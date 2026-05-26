@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: bdpm-ingest
+  description: French public drug database (BDPM) ingest pipeline
+  contact:
+    name: Felix
+  license:
+    name: ''
+  version: 0.1.0
+paths:
+  /atc:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /atc — top-level ATC codes (1-char chapters)
+      operationId: atc_top_level
+      responses:
+        '200':
+          description: Top-level ATC chapters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AtcCode'
+  /atc/{code}:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /atc/:code — ATC detail with child codes and drug count
+      operationId: atc_detail
+      parameters:
+      - name: code
+        in: path
+        description: ATC code
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ATC detail with children and drug count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtcDetail'
+  /availability:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /availability — availability/sales status
+      description: |-
+        Query params:
+        ?cis=XXX — availability for a specific drug
+        ?status=1 — all drugs in rupture (status_type=1)
+        no params — recent availability rows (limit 200)
+      operationId: availability
+      parameters:
+      - name: cis
+        in: query
+        description: Filter by CIS code
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: status
+        in: query
+        description: Filter by status type
+        required: false
+        schema:
+          type: integer
+          format: int32
+          nullable: true
+      responses:
+        '200':
+          description: Availability rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AvailabilityRow'
+  /drugs:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: FTS5-powered drug search endpoint.
+      description: |-
+        Returns up to `limit` drugs matching the query string.
+        Uses `spawn_blocking` because rusqlite is blocking, not async.
+      operationId: search_drugs
+      parameters:
+      - name: q
+        in: query
+        description: Search query
+        required: true
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Max results (default 20)
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      responses:
+        '200':
+          description: List of matching drugs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DrugSearchResult'
+  /drugs/{cis}:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /drugs/:cis — Return full drug detail including presentations and compositions.
+      operationId: drug_detail
+      parameters:
+      - name: cis
+        in: path
+        description: Drug CIS code
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Drug detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DrugDetail'
+        '404':
+          description: Drug not found
+  /generic-groups:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /generic-groups — list all generic groups with CIS count
+      operationId: list_generic_groups
+      responses:
+        '200':
+          description: List of generic groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenericGroupList'
+  /generic-groups/{group_id}:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /generic-groups/:group_id — drugs in a specific generic group
+      operationId: generic_group_detail
+      parameters:
+      - name: group_id
+        in: path
+        description: Generic group ID
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Members of the generic group
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenericGroupMember'
+  /health:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: Health check endpoint
+      operationId: health
+      responses:
+        '200':
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+components:
+  schemas:
+    AtcCode:
+      type: object
+      required:
+      - atc_code
+      properties:
+        atc_code:
+          type: string
+        parent_1_char:
+          type: string
+          nullable: true
+    AtcDetail:
+      type: object
+      required:
+      - atc_code
+      - children
+      - drugs_count
+      properties:
+        atc_code:
+          type: string
+        children:
+          type: array
+          items:
+            type: string
+        drugs_count:
+          type: integer
+          format: int64
+        parent_1_char:
+          type: string
+          nullable: true
+    AvailabilityRow:
+      type: object
+      required:
+      - cis
+      - status_type
+      properties:
+        cip:
+          type: string
+          nullable: true
+        cis:
+          type: string
+        date_remise:
+          type: string
+          nullable: true
+        date_start:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        status_type:
+          type: integer
+          format: int32
+    Composition:
+      type: object
+      required:
+      - substance_name
+      - pharm_code
+      properties:
+        dosage:
+          type: string
+          nullable: true
+        pharm_code:
+          type: string
+        substance_name:
+          type: string
+    DrugDetail:
+      type: object
+      required:
+      - cis
+      - name
+      - is_patent
+      - presentations
+      - compositions
+      properties:
+        atc_code:
+          type: string
+          nullable: true
+        auth_date:
+          type: string
+          nullable: true
+        auth_status:
+          type: string
+          nullable: true
+        cis:
+          type: string
+        compositions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Composition'
+        form:
+          type: string
+          nullable: true
+        is_patent:
+          type: boolean
+        lab_name:
+          type: string
+          nullable: true
+        name:
+          type: string
+        presentations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Presentation'
+        procedure_type:
+          type: string
+          nullable: true
+        route:
+          type: string
+          nullable: true
+    DrugSearchResult:
+      type: object
+      required:
+      - cis
+      - name
+      properties:
+        cis:
+          type: string
+        form:
+          type: string
+          nullable: true
+        lab_name:
+          type: string
+          nullable: true
+        name:
+          type: string
+    GenericGroupList:
+      type: object
+      required:
+      - group_id
+      - cis_count
+      properties:
+        cis_count:
+          type: integer
+          format: int64
+        group_id:
+          type: string
+        group_name:
+          type: string
+          nullable: true
+    GenericGroupMember:
+      type: object
+      required:
+      - cis
+      - is_orphan
+      properties:
+        cis:
+          type: string
+        is_orphan:
+          type: boolean
+        name:
+          type: string
+          nullable: true
+        sort_order:
+          type: integer
+          format: int64
+          nullable: true
+        type:
+          type: string
+          nullable: true
+    HealthResponse:
+      type: object
+      required:
+      - status
+      - drug_count
+      properties:
+        drug_count:
+          type: integer
+          format: int64
+        last_import:
+          type: string
+          nullable: true
+        status:
+          type: string
+    Presentation:
+      type: object
+      required:
+      - cip
+      properties:
+        cip:
+          type: string
+        cip_raw:
+          type: string
+          nullable: true
+        ean13:
+          type: string
+          nullable: true
+        labels:
+          type: string
+          nullable: true
+        pres_status:
+          type: string
+          nullable: true
+        prix_rate_cents:
+          type: integer
+          format: int64
+          nullable: true
+        prix_ville_cents:
+          type: integer
+          format: int64
+          nullable: true
+        reimb_rate:
+          type: number
+          format: float
+          nullable: true
+        reimbursable:
+          type: string
+          nullable: true
+tags:
+- name: bdpm-ingest
+  description: BDPM Drug Database API
+

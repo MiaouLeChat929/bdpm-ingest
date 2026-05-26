@@ -3,14 +3,15 @@ use axum::{extract::{Query, State}, Json};
 use rusqlite::Connection;
 use serde::Deserialize;
 use serde::Serialize;
+use utoipa::IntoParams;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
 pub struct AvailParams {
     pub cis: Option<String>,
     pub status: Option<i32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct AvailabilityRow {
     pub cis: String,
     pub name: Option<String>,
@@ -26,6 +27,18 @@ pub struct AvailabilityRow {
 ///   ?cis=XXX — availability for a specific drug
 ///   ?status=1 — all drugs in rupture (status_type=1)
 ///   no params — recent availability rows (limit 200)
+#[utoipa::path(
+    get,
+    path = "/availability",
+    params(
+        ("cis" = Option<String>, Query, description = "Filter by CIS code"),
+        ("status" = Option<i32>, Query, description = "Filter by status type")
+    ),
+    responses(
+        (status = 200, description = "Availability rows", body = Vec<AvailabilityRow>)
+    ),
+    tag = "bdpm-ingest"
+)]
 pub async fn availability(
     Query(params): Query<AvailParams>,
     State(state): State<AppState>,

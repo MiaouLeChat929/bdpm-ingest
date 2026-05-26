@@ -83,7 +83,7 @@ impl BDPMFile {
         }
     }
 
-    /// Download URL path (appended to BDPM_BASE_URL).
+    /// Download URL path (appended to BDPM_URL).
     pub fn download_path(&self) -> &'static str {
         self.schema().download_path
     }
