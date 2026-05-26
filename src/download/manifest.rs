@@ -138,10 +138,8 @@ const CIS_CIP_BDPM: FileSchema = FileSchema {
     filename: "CIS_CIP_bdpm.txt",
     download_path: "/download/file/CIS_CIP_bdpm.txt",
     encoding: Encoding::Utf8,
-    field_count: 13,
-    // Field 11: date_de_commencement (DD/MM/YYYY); field 12: NULL or date
-    date_fields: &[(11, DateFormat::DDMMYYYY), (12, DateFormat::DDMMYYYY)],
-    // 100% of rows have trailing tab → phantom 14th field needs stripping
+    field_count: 12,
+    date_fields: &[(5, DateFormat::DDMMYYYY)],
     has_trailing_tab_fix: true,
     target_table: "presentations",
 };

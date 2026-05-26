@@ -43,7 +43,14 @@ impl Iterator for TabParser {
         let mut line = String::new();
         loop {
             match self.reader.read_line(&mut line) {
-                Ok(0) => return None, // EOF
+                Ok(0) => {
+                    // Emit final buffered record if any
+                    if !self.buffer.is_empty() {
+                        let result = std::mem::take(&mut self.buffer);
+                        return Some(Ok(decode_line(&result.join("\t"))));
+                    }
+                    return None; // EOF
+                }
                 Ok(_) => {}
                 Err(e) => return Some(Err(anyhow::anyhow!("IO error: {}", e))),
             }
@@ -65,8 +72,9 @@ impl Iterator for TabParser {
                 // Emit previous buffer if any
                 if !self.buffer.is_empty() {
                     let result = std::mem::take(&mut self.buffer);
-                    self.buffer.clear();
-                    self.in_multiline = false;
+                    // Push current line first (so we don't lose it), then return old buffer
+                    self.buffer.push(trimmed.to_string());
+                    self.in_multiline = true;
                     line.clear();
                     return Some(Ok(decode_line(&result.join("\t"))));
                 }
@@ -100,4 +108,48 @@ fn is_cis_code(line: &str) -> bool {
 /// Split a line on tab characters.
 fn decode_line(line: &str) -> Vec<String> {
     line.split('\t').map(|s| s.to_string()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_cis_lines_emitted_no_loss() {
+        // CIS_CIP_bdpm has only CIS-starting lines; every line triggers is_cis_code.
+        // Old bug: even lines were discarded. Fix: push current, emit previous.
+        let content: Vec<u8> = (1..=100u32)
+            .map(|i| format!("{i:08}\tfield1\tfield2\n"))
+            .collect::<String>()
+            .into_bytes();
+        let cursor = Cursor::new(content);
+        let reader = BufReader::with_capacity(1024, cursor);
+        let mut parser = TabParser {
+            reader,
+            line_number: 0,
+            buffer: Vec::new(),
+            in_multiline: false,
+        };
+        let rows: Vec<_> = (&mut parser).collect();
+        assert_eq!(rows.len(), 100, "All 100 lines should be emitted, not half");
+    }
+
+    #[test]
+    fn last_line_emitted_at_eof() {
+        // Old bug: last row stayed in buffer, never emitted at EOF.
+        // Fix: emit buffered record when EOF is reached.
+        let content = "60000001\ta\tb\n60000002\tc\td\n";
+        let cursor = Cursor::new(content.as_bytes().to_vec());
+        let reader = BufReader::with_capacity(1024, cursor);
+        let mut parser = TabParser {
+            reader,
+            line_number: 0,
+            buffer: Vec::new(),
+            in_multiline: false,
+        };
+        let rows: Vec<_> = (&mut parser).collect();
+        assert_eq!(rows.len(), 2, "Both lines including last should be emitted");
+        assert_eq!(rows[0].as_ref().unwrap()[0], "60000001");
+        assert_eq!(rows[1].as_ref().unwrap()[0], "60000002");
+    }
 }

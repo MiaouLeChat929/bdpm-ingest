@@ -44,7 +44,7 @@ download/   manifest.rs  — BDPMFile enum (10 files), Encoding, FileSchema, dow
              listing.rs  — HTML listing page date parser (polling without downloading)
              fetcher.rs  — ureq HTTP client, 3-retry backoff, fetch_text() for HTML
 
-parse/      tab.rs      — TabParser streaming iterator, multiline record handling (SMR/ASMR avis field)
+parse/      tab.rs      — TabParser streaming iterator, Windows-1252/UTF-8/Latin-1 via encoding_rs, multiline record handling (SMR/ASMR avis field)
              mod.rs     — parse_file(path, BDPMFile) → Vec<ValidatedRow>
 
 normalize/  mod.rs     — normalize_row dispatcher per BDPMFile
@@ -64,11 +64,11 @@ db/        mod.rs     — init_db (WAL + FK_ON + migrations), optimize_for_bulk_
 
 **BDPMFile** is the central routing type. Every normalizer and INSERT SQL is dispatched from it. The `target_table()` method maps each file to its DB table name; `schema()` returns field count and encoding.
 
-**Windows-1252 encoding** — 7 of 10 files use Windows-1252, 2 use UTF-8, 1 uses Latin-1. The BDPM server returns no charset header. encoding_rs is in Cargo.toml but not yet wired (Phase 1.5). The tab parser currently reads platform-default.
+**Windows-1252 encoding** — 7 of 10 files use Windows-1252, 2 use UTF-8, 1 uses Latin-1. The BDPM server returns no charset header. encoding_rs is wired via `std::fs::read()` + decode at file-open time in `TabParser::from_path()`.
 
-**Curly apostrophes** — byte 0x92 (Windows-1252 U+2019 RIGHT SINGLE QUOTATION MARK) appears in lab names. `normalize_apostrophes()` replaces `\u{2019}` and `\u{2018}` with straight `'` before INSERT. Handled in `normalize/mod.rs`.
+**Trailing tab** — CIS_CIP_bdpm has a phantom trailing tab creating a 13th awk field (always empty). `strip_one_trailing_empty()` removes exactly 1 trailing empty, preserving middle empty fields (prices/reimb fields for non-commercialisé rows). Schema field_count: 12. Short rows (8 fields) are padded with empty strings by the >= half-threshold logic in `parse_file()`.
 
-**Trailing tab** — CIS_CIP_bdpm has a phantom 14th field (100% trailing empty). `strip_trailing_empty()` in `parse/mod.rs` removes empty trailing fields during parsing. CIS_CIP_Dispo_Spec has empty MIDDLE fields (not trailing) — different pattern.
+**TabParser multiline logic** — when a CIS-code line triggers record emission, the current line is pushed to buffer FIRST, then the previous buffer is emitted. Old code lost the triggering line on even positions (50% of rows discarded). On EOF, buffered record is flushed. Covered by 2 unit tests.
 
 **Orphan FKs** — SMR/ASMR/GENER reference withdrawn drugs. The `is_orphan` flag is set post-import via UPDATE. `INSERT OR REPLACE` for drugs preserves references.
 

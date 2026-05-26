@@ -62,24 +62,24 @@ fn strip_eu_slash(s: &str) -> String {
 }
 
 fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
-    // 13 fields: cis, cip7, cip13, labels, pres_status, comm_status, comm_date, prix_ht, prix_ville, prix_rate, reimb_rate, reimb_conditions, ?(phantom)
+    // 12 fields (after trailing empty strip): cis, cip7, labels, pres_status, comm_status, comm_date, ean13, reimbursable, reimb_rate, prix_ht, prix_ville, prix_rate
     NormalizedRow {
         table: "presentations",
         values: vec![
             Some(f[0].clone()),  // cis
-            Some(strip_cip7(&f[1])),  // cip (canonical 7-digit)
+            Some(strip_cip7(&f[1])),  // cip (canonical 7-digit from 34009-prefixed CIP13)
             Some(f[1].clone()),  // cip_raw
             Some(strip_field(&f[2])),  // labels
             Some(strip_field(&f[3])),  // pres_status
             Some(strip_field(&f[4])),  // comm_status
             parse_date_ddmmYYYY(&f[5]).ok(),  // comm_date ISO
-            parse_price_cents(&f[6]).ok().flatten().map(|c| c.to_string()),  // prix_ht_cents
-            parse_price_cents(&f[7]).ok().flatten().map(|c| c.to_string()),  // prix_ville_cents
-            parse_price_cents(&f[8]).ok().flatten().map(|c| c.to_string()),  // prix_rate_cents
-            normalize_reimb_rate(&f[9]).map(|r| r.to_string()),  // reimb_rate
-            Some(strip_field(&f[10])),  // reimb_conditions
-            if f[11].is_empty() { None } else { Some(f[11].clone()) },  // ean13
-            Some(strip_field(&f[12])),  // reimbursable
+            parse_price_cents(&f[9]).ok().flatten().map(|c| c.to_string()),  // prix_ht_cents
+            parse_price_cents(&f[10]).ok().flatten().map(|c| c.to_string()),  // prix_ville_cents
+            parse_price_cents(&f[11]).ok().flatten().map(|c| c.to_string()),  // prix_rate_cents
+            normalize_reimb_rate(&f[8]).map(|r| r.to_string()),  // reimb_rate
+            None,  // reimb_conditions (not in CIS_CIP_bdpm source)
+            if f[6].is_empty() { None } else { Some(f[6].clone()) },  // ean13
+            Some(strip_field(&f[7])),  // reimbursable (oui/non)
         ],
     }
 }

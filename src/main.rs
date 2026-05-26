@@ -127,7 +127,7 @@ fn main() -> Result<()> {
             let tables = [
                 "drugs", "presentations", "compositions", "generic_groups",
                 "prescription_rules", "smr", "asmr", "availability",
-                "atc_codes", "has_links",
+                "atc_codes", "mitm", "has_links",
             ];
 
             for table in tables {

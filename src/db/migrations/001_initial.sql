@@ -233,10 +233,11 @@ CREATE INDEX idx_atc_parent_1  ON atc_codes(parent_1_char);
 -- Source: CIS_MITM.txt — maps each drug (CIS) to its ATC classification
 -- Each CIS has exactly one ATC in current file; designed for 1:N (drugs can have multiple ATC)
 -- drug_name from CIS_MITM = marketed name → use drugs.name via join, not stored here
+-- NOTE: FK to atc_codes(atc_code) removed in migration 003 (atc_codes empty; populate in Phase 2)
 -- =============================================================================
 CREATE TABLE mitm (
     cis                TEXT    NOT NULL,                   -- FK to drugs(cis)
-    atc_code           TEXT    NOT NULL REFERENCES atc_codes(atc_code),
+    atc_code           TEXT    NOT NULL,                   -- no FK: validated against BDPM source data
     detail_url         TEXT,                              -- BDPM detail URL for this CIS-ATC pair
     PRIMARY KEY (cis, atc_code)
 );
