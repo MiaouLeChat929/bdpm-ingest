@@ -13,9 +13,9 @@ pub fn dedup_compo(rows: Vec<NormalizedRow>) -> Vec<NormalizedRow> {
             return true; // keep malformed for logging
         }
         let key = (
-            vals[0].as_ref().map(|s| s.as_str()).unwrap_or("").to_string(),   // cis
-            vals[2].as_ref().map(|s| s.as_str()).unwrap_or("").to_string(),   // substance_code
-            vals[4].as_ref().map(|s| s.as_str()).unwrap_or("").to_string(),   // dosage
+            vals[0].as_deref().unwrap_or("").to_string(),   // cis
+            vals[2].as_deref().unwrap_or("").to_string(),   // substance_code
+            vals[4].as_deref().unwrap_or("").to_string(),   // dosage
         );
         seen.insert(key)
     }).collect()

@@ -65,6 +65,8 @@ jobs:
         run: cargo build
       - name: Run tests
         run: cargo test
+      - name: Run integration tests
+        run: cargo test --test integration
 
   audit:
     name: Security Audit

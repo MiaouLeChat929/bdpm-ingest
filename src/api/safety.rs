@@ -11,7 +11,7 @@ use crate::cache::TtlCache;
 use crate::api::AppState;
 
 /// Safety info response (stub).
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SafetyResponse {
     pub cis: String,
     pub data_available: bool,

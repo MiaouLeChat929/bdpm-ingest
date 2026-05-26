@@ -5,7 +5,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 
-use crate::db::{init_db, optimize_for_bulk_insert, restore_normal_settings};
+use crate::db::{optimize_for_bulk_insert, restore_normal_settings};
 use crate::download::manifest::BDPMFile;
 use crate::download::state::StateStore;
 use crate::download::Fetcher;
@@ -163,7 +163,7 @@ fn import_file(
 
     let result = (|| -> Result<ImportStats> {
         // Wrap in transaction
-        let mut tx = conn.transaction()?;
+        let tx = conn.transaction()?;
 
         // Clear existing data (except drugs — upsert preserves references)
         if file != BDPMFile::CIS_bdpm {
@@ -181,77 +181,77 @@ fn import_file(
                 BDPMFile::CIS_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[5].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[6].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[7].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[8].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[9].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[10].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[11].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""),
+                        v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""),
+                        v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""),
+                        v[5].as_deref().unwrap_or(""),
+                        v[6].as_deref().unwrap_or(""),
+                        v[7].as_deref().unwrap_or(""),
+                        v[8].as_deref().unwrap_or(""),
+                        v[9].as_deref().unwrap_or(""),
+                        v[10].as_deref().unwrap_or(""),
+                        v[11].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_CIP_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""), v[5].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[6].as_ref().map(|s| s.as_str()).unwrap_or(""), v[7].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[8].as_ref().map(|s| s.as_str()).unwrap_or(""), v[9].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[10].as_ref().map(|s| s.as_str()).unwrap_or(""), v[11].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[12].as_ref().map(|s| s.as_str()).unwrap_or(""), v[13].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
+                        v[6].as_deref().unwrap_or(""), v[7].as_deref().unwrap_or(""),
+                        v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
+                        v[10].as_deref().unwrap_or(""), v[11].as_deref().unwrap_or(""),
+                        v[12].as_deref().unwrap_or(""), v[13].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_COMPO_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""), v[5].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[6].as_ref().map(|s| s.as_str()).unwrap_or(""), v[7].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
+                        v[6].as_deref().unwrap_or(""), v[7].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""), v[5].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_GENER_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_CPD_bdpm | BDPMFile::HAS_LiensPageCT_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_CIP_Dispo_Spec => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[4].as_ref().map(|s| s.as_str()).unwrap_or(""), v[5].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[6].as_ref().map(|s| s.as_str()).unwrap_or(""), v[7].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
+                        v[6].as_deref().unwrap_or(""), v[7].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_MITM => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
-                        v[0].as_ref().map(|s| s.as_str()).unwrap_or(""), v[1].as_ref().map(|s| s.as_str()).unwrap_or(""),
-                        v[2].as_ref().map(|s| s.as_str()).unwrap_or(""), v[3].as_ref().map(|s| s.as_str()).unwrap_or(""),
+                        v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
                     ])
                 }
             };
@@ -262,7 +262,7 @@ fn import_file(
                     stats.bad_rows += 1;
                     if stats.bad_rows <= 3 {
                         let preview: Vec<&str> = row.values.iter().take(3)
-                            .map(|v| v.as_ref().map(|s| s.as_str()).unwrap_or(""))
+                            .map(|v| v.as_deref().unwrap_or(""))
                             .collect();
                         tracing::warn!("Bad row in {}: {} — {}", table, e, preview.join(", "));
                     }
@@ -328,15 +328,10 @@ fn insert_sql(file: BDPMFile) -> String {
 
 // ---- Report types ----
 
+#[derive(Default)]
 pub struct ImportReport {
     pub results: Vec<FileImportResult>,
     pub total_duration_ms: u64,
-}
-
-impl Default for ImportReport {
-    fn default() -> Self {
-        Self { results: Vec::new(), total_duration_ms: 0 }
-    }
 }
 
 pub struct FileImportResult {

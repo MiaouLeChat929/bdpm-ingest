@@ -30,7 +30,7 @@ impl Fetcher {
     /// Returns an error if all 3 attempts fail.
     pub fn fetch(&self, url: &str, dest_dir: &Path) -> anyhow::Result<Vec<u8>> {
         // Extract filename from URL for disk destination.
-        let filename = url.split('/').last().unwrap_or("unknown");
+        let filename = url.split('/').next_back().unwrap_or("unknown");
         let dest = dest_dir.join(filename);
 
         let backoffs = [5, 10, 30];

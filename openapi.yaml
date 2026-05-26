@@ -396,6 +396,20 @@ components:
         reimbursable:
           type: string
           nullable: true
+    SafetyResponse:
+      type: object
+      description: Safety info response (stub).
+      required:
+      - cis
+      - data_available
+      - message
+      properties:
+        cis:
+          type: string
+        data_available:
+          type: boolean
+        message:
+          type: string
 tags:
 - name: bdpm-ingest
   description: BDPM Drug Database API

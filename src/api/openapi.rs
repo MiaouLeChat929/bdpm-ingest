@@ -23,6 +23,7 @@ use crate::api;
         api::atc::AtcCode,
         api::atc::AtcDetail,
         api::availability::AvailabilityRow,
+        api::safety::SafetyResponse,
         api::HealthResponse,
     )),
     tags(

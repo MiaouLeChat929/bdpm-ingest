@@ -15,8 +15,6 @@ pub fn strip_cip_ean(raw: &str) -> String {
     let t = raw.trim();
     if t.len() == 13 && t.starts_with("34009") {
         t[6..].to_string()
-    } else if t.len() == 7 && t.chars().all(|c| c.is_ascii_digit()) {
-        t.to_string()
     } else {
         t.to_string()
     }

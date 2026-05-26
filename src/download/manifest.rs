@@ -8,6 +8,7 @@ pub enum Encoding {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum DateFormat {
     /// DD/MM/YYYY — e.g., "28/04/2026"
     DDMMYYYY,
@@ -38,6 +39,7 @@ pub struct FileSchema {
 
 /// All 10 stable BDPM files (CIS_InfoImportantes excluded — safety-critical, Phase 3.5)
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[allow(non_camel_case_types)]
 pub enum BDPMFile {
     /// Core drug records — CIS, name, form, route, status, dates, lab
     CIS_bdpm,

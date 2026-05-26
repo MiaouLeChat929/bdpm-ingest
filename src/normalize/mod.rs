@@ -6,7 +6,7 @@ pub mod dedup;
 
 pub use price::parse_price_cents;
 pub use date::{parse_date_ddmmYYYY, parse_date_YYYYMMDD};
-pub use fields::{strip_field, normalize_spaces, normalize_generic_type};
+pub use fields::{strip_field, normalize_generic_type};
 pub use html::strip_avis_html;
 pub use dedup::dedup_compo;
 
@@ -213,11 +213,11 @@ fn normalize_liens(f: &[String]) -> NormalizedRow {
 }
 
 /// Apply apostrophe normalization to all string fields in a row
+#[allow(clippy::manual_flatten)]
 pub fn normalize_apostrophes(row: &mut NormalizedRow) {
     for val in &mut row.values {
         if let Some(s) = val {
-            *s = s.replace('\u{2019}', "'")
-                   .replace('\u{2018}', "'");
+            *s = s.replace(['\u{2019}', '\u{2018}'], "'");
         }
     }
 }

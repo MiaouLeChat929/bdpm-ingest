@@ -12,9 +12,7 @@ pub mod availability;
 pub mod openapi;
 pub mod safety;
 
-pub use drugs::drug_detail;
-pub use search::search_drugs;
-pub use safety::{SafetyCache, SafetyData};
+pub use safety::SafetyData;
 
 use crate::cache::TtlCache;
 

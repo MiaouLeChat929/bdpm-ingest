@@ -8,8 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests only (24 tests in normalize, parse modules)
+# Unit tests (31 tests in normalize, parse modules)
 cargo test --lib
+
+# Integration tests (29 tests)
+cargo test --test integration
 
 # All tests
 cargo test
@@ -60,6 +63,8 @@ normalize/  mod.rs     — normalize_row dispatcher per BDPMFile
 
 import/     mod.rs     — run_import orchestrator, insert_sql per table, ImportReport
 
+cache/     mod.rs     — TtlCache<K, V>, 6-hour default, Mutex<HashMap>
+
 sync/       mod.rs     — SyncPlan, ChangeReason, detect_changes() [dry-run], run_sync(), run_dispo_sync()
                          All delegate to run_import() — no logic duplication.
 
@@ -70,10 +75,13 @@ db/        mod.rs     — init_db (WAL + FK_ON + migrations), optimize_for_bulk_
 api/       mod.rs     — AppState, run_server (axum), all routes wired, health endpoint (JSON: status/last_import/drug_count)
              search.rs  — GET /drugs FTS5 search endpoint
              drugs.rs   — GET /drugs/:cis with presentations + compositions
+             safety.rs  — GET /drugs/:cis/safety stub endpoint
              groups.rs  — GET /generic-groups, /generic-groups/:id
              atc.rs     — GET /atc, /atc/:code (LIKE prefix for hierarchy)
              availability.rs — GET /availability?cis=&cip=
              openapi.rs — utoipa OpenApi struct, /openapi.json + /openapi.yaml endpoints
+
+tests/     integration.rs — 29 tests (price, date, normalization, referential integrity, row counts)
 ```
 
 ## Key Design Decisions

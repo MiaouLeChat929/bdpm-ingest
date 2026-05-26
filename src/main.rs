@@ -1,3 +1,5 @@
+#![allow(dead_code, non_camel_case_types, non_snake_case)]
+
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
@@ -18,7 +20,7 @@ use crate::download::{state::StateStore, Fetcher, fetch_listing_dates, diff_list
 use crate::download::manifest::BDPMFile;
 use crate::sync::{run_sync, run_dispo_sync, detect_changes};
 
-fn state_path(data_dir: &PathBuf) -> PathBuf {
+fn state_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("import_state.json")
 }
 
@@ -201,7 +203,7 @@ fn main() -> Result<()> {
                 ))
             })?;
 
-            println!("{:<25} {:>8} {:>10} {:>6} {:>8}  {}", "file", "rows", "status", "bad", "ms", "imported_at");
+            println!("{:<25} {:>8} {:>10} {:>6} {:>8}  imported_at", "file", "rows", "status", "bad", "ms");
             println!("{}", "-".repeat(80));
             for row in rows.flatten() {
                 let ms = row.4.map(|m| m.to_string()).unwrap_or_default();

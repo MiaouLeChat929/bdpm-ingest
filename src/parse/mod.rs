@@ -1,7 +1,7 @@
 pub mod tab;
 pub use tab::TabParser;
 
-pub use crate::download::manifest::{BDPMFile, Encoding, FileSchema, DateFormat};
+pub use crate::download::manifest::BDPMFile;
 
 pub struct ValidatedRow {
     pub fields: Vec<String>,
@@ -74,16 +74,9 @@ pub fn parse_file(path: &std::path::Path, file: BDPMFile) -> anyhow::Result<Vec<
 }
 
 /// Strip exactly one trailing empty field (handles the phantom trailing-tab in CIS_CIP_bdpm).
-/// Unlike strip_trailing_empty, this preserves legitimate empty fields in the middle.
+/// Preserves legitimate empty fields in the middle.
 fn strip_one_trailing_empty(mut fields: Vec<String>) -> Vec<String> {
     if fields.last().map(|s| s.is_empty()).unwrap_or(false) {
-        fields.pop();
-    }
-    fields
-}
-
-fn strip_trailing_empty(mut fields: Vec<String>) -> Vec<String> {
-    while fields.last().map(|s| s.is_empty()).unwrap_or(false) {
         fields.pop();
     }
     fields
