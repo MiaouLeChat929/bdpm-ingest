@@ -58,10 +58,10 @@ fn normalize_cis_bdpm(f: &[String]) -> NormalizedRow {
             Some(strip_field(&f[5])),  // procedure_type
             Some(strip_field(&f[6])),  // comm_status
             parse_date_ddmmYYYY(&f[7]).ok(),  // auth_date ISO
-            Some(normalize_spaces(&strip_field(&f[9]))),  // lab_name (strip + normalize double-spaces)
-            Some(if f[10].trim().eq_ignore_ascii_case("oui") { "1" } else { "0" }.to_string()),  // is_patent
-            if f[8].is_empty() { None } else { Some(strip_field(&f[8])) },  // alert_type
-            Some(strip_eu_slash(&f[11])),  // eu_number (field 11)
+            Some(normalize_spaces(&strip_field(&f[10]))),  // lab_name (field 10: manufacturer lab)
+            Some(if f[11].trim().eq_ignore_ascii_case("oui") { "1" } else { "0" }.to_string()),  // is_patent (field 11: Oui/Non)
+            if f[8].is_empty() { None } else { Some(strip_field(&f[8])) },  // alert_type (field 8)
+            Some(strip_eu_slash(&f[9])),  // eu_number (field 9: EU authorization number)
         ],
     }
 }
@@ -453,9 +453,9 @@ mod tests {
             "Commercialisée",     // f[6]: comm_status
             "12/03/1998",         // f[7]: auth_date
             "",                   // f[8]: alert_type (empty)
-            "SANOFI",             // f[9]: lab_name
-            "Oui",                // f[10]: is_patent
-            "EU/1/17/1235/",      // f[11]: eu_number (with trailing slash)
+            "EU/1/17/1235/",      // f[9]: eu_number (with trailing slash)
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
 
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
@@ -503,9 +503,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            "SANOFI",
-            "Oui",
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
 
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
@@ -528,9 +528,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            " SANOFI ",            // f[9]: lab_name with leading/trailing space
-            "Oui",
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            " SANOFI ",            // f[10]: lab_name with leading/trailing space
+            "Oui",                // f[11]: is_patent
         ]);
 
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
@@ -552,9 +552,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            "SANOFI",
-            "Oui",                 // f[10]: is_patent
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
         let result_oui = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui).unwrap();
         assert_eq!(result_oui.values[10], Some("1".to_string()));
@@ -570,9 +570,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            "SANOFI",
-            "Non",                // f[10]: is_patent
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Non",                // f[11]: is_patent
         ]);
         let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non).unwrap();
         assert_eq!(result_non.values[10], Some("0".to_string()));
@@ -591,9 +591,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            "SANOFI",
-            "Oui",
-            "EU/1/17/1235/",      // f[11]: eu_number with trailing slash
+            "EU/1/17/1235/",      // f[9]: eu_number with trailing slash
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
         let result_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_slash).unwrap();
         assert_eq!(result_slash.values[12], Some("EU/1/17/1235".to_string()));
@@ -609,9 +609,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",
-            "SANOFI",
-            "Oui",
-            "EU/1/17/1235",       // f[11]: eu_number without trailing slash
+            "EU/1/17/1235",       // f[9]: eu_number without trailing slash
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
         let result_no_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_no_slash).unwrap();
         assert_eq!(result_no_slash.values[12], Some("EU/1/17/1235".to_string()));
@@ -630,9 +630,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "",                   // f[8]: alert_type (empty)
-            "SANOFI",
-            "Oui",
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
         let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_empty).unwrap();
         assert_eq!(result_empty.values[11], None);
@@ -648,9 +648,9 @@ mod tests {
             "Commercialisée",
             "12/03/1998",
             "Rupture de stock",   // f[8]: alert_type (non-empty)
-            "SANOFI",
-            "Oui",
-            "EU/1/17/1235/",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Oui",                // f[11]: is_patent
         ]);
         let result_with_alert = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_with_alert).unwrap();
         assert_eq!(result_with_alert.values[11], Some("Rupture de stock".to_string()));
@@ -663,7 +663,10 @@ mod tests {
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active",
             "Enreg homeo (Proc. Nat.)",  // f[5]: homeopathic procedure type
-            "Commercialisée", "12/03/1998", "", "BOIRON", "Non", "",
+            "Commercialisée", "12/03/1998", "",
+            "",                           // f[9]: eu_number (empty)
+            "BOIRON",                      // f[10]: lab_name
+            "Non",                         // f[11]: is_patent
         ]);
         assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_homeo).is_none());
 
@@ -672,7 +675,10 @@ mod tests {
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active",
             "Procédure nationale",       // f[5]: normal procedure type
-            "Commercialisée", "12/03/1998", "", "SANOFI", "Oui", "",
+            "Commercialisée", "12/03/1998", "",
+            "",                           // f[9]: eu_number (empty)
+            "SANOFI",                     // f[10]: lab_name
+            "Oui",                        // f[11]: is_patent
         ]);
         assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_normal).is_some());
     }
@@ -889,9 +895,10 @@ mod tests {
         let row_oui_upper = make_cis_bdpm_row([
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active", "Procédure nationale", "Commercialisée",
-            "12/03/1998", "", "SANOFI",
-            "OUI",    // f[10]: uppercase — matches case-insensitively
-            "EU/1/17/1235/",
+            "12/03/1998", "",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "OUI",                // f[11]: uppercase is_patent
         ]);
         let result_oui_upper = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui_upper).unwrap();
         assert_eq!(result_oui_upper.values[10], Some("1".to_string())); // matches "oui" case-insensitively
@@ -900,9 +907,10 @@ mod tests {
         let row_non = make_cis_bdpm_row([
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active", "Procédure nationale", "Commercialisée",
-            "12/03/1998", "", "SANOFI",
-            "Non",    // f[10]: proper-case "Non" — only exact "Oui" maps to "1"
-            "EU/1/17/1235/",
+            "12/03/1998", "",
+            "EU/1/17/1235/",      // f[9]: eu_number
+            "SANOFI",             // f[10]: lab_name
+            "Non",                // f[11]: proper-case is_patent
         ]);
         let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non).unwrap();
         assert_eq!(result_non.values[10], Some("0".to_string()));
