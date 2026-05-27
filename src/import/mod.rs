@@ -254,7 +254,7 @@ fn import_file(
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
                         v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
-                        v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
+                        v[2].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_InfoImportantes => {
@@ -328,7 +328,8 @@ fn import_file(
     result
 }
 
-fn insert_sql(file: BDPMFile) -> String {
+/// Returns the INSERT SQL for a BDPM file. pub(crate) for testing.
+pub(crate) fn insert_sql(file: BDPMFile) -> String {
     match file {
         BDPMFile::CIS_bdpm => {
             "INSERT OR REPLACE INTO drugs (cis, name_raw, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number)
@@ -351,7 +352,7 @@ fn insert_sql(file: BDPMFile) -> String {
              VALUES (?1,?2,?3,?4,?5,?6)".into()
         }
         BDPMFile::CIS_GENER_bdpm => {
-            "INSERT INTO generic_groups (group_id, group_name, cis, type, sort_order)
+            "INSERT OR IGNORE INTO generic_groups (group_id, group_name, cis, type, sort_order)
              VALUES (?1,?2,?3,?4,?5)".into()
         }
         BDPMFile::CIS_CPD_bdpm => {
@@ -420,6 +421,234 @@ impl ImportReport {
             }
         }
         println!("\nTotal: {}ms", self.total_duration_ms);
+    }
+}
+
+#[cfg(test)]
+mod insert_sql_tests {
+    use super::*;
+
+    // Count params: iterate through SQL string, counting '?' and any following digits
+    fn count_params(sql: &str) -> usize {
+        let mut count = 0;
+        let mut chars = sql.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '?' {
+                // Check if it's followed by digits (numbered param)
+                let mut num_str = String::new();
+                while let Some(&next_c) = chars.peek() {
+                    if next_c.is_ascii_digit() {
+                        num_str.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                count += 1;
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn test_insert_sql_drugs() {
+        let sql = insert_sql(BDPMFile::CIS_bdpm);
+        assert!(
+            sql.contains("INSERT OR REPLACE INTO drugs"),
+            "Expected INSERT OR REPLACE INTO drugs, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            13,
+            "Expected 13 params for drugs, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_presentations() {
+        let sql = insert_sql(BDPMFile::CIS_CIP_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO presentations"),
+            "Expected INSERT OR IGNORE INTO presentations, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            15,
+            "Expected 15 params for presentations, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_compositions() {
+        let sql = insert_sql(BDPMFile::CIS_COMPO_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO compositions"),
+            "Expected INSERT OR IGNORE INTO compositions, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            10,
+            "Expected 10 params for compositions, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_smr() {
+        let sql = insert_sql(BDPMFile::CIS_HAS_SMR_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO smr"),
+            "Expected INSERT OR IGNORE INTO smr, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            6,
+            "Expected 6 params for smr, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_asmr() {
+        let sql = insert_sql(BDPMFile::CIS_HAS_ASMR_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO asmr"),
+            "Expected INSERT OR IGNORE INTO asmr, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            6,
+            "Expected 6 params for asmr, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_generic_groups() {
+        let sql = insert_sql(BDPMFile::CIS_GENER_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO generic_groups"),
+            "Expected INSERT OR IGNORE INTO generic_groups, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            5,
+            "Expected 5 params for generic_groups, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_prescription_rules() {
+        let sql = insert_sql(BDPMFile::CIS_CPD_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO prescription_rules"),
+            "Expected INSERT OR IGNORE INTO prescription_rules, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            2,
+            "Expected 2 params for prescription_rules, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_availability() {
+        let sql = insert_sql(BDPMFile::CIS_CIP_Dispo_Spec);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO availability"),
+            "Expected INSERT OR IGNORE INTO availability, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            8,
+            "Expected 8 params for availability, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_mitm() {
+        let sql = insert_sql(BDPMFile::CIS_MITM);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO mitm"),
+            "Expected INSERT OR IGNORE INTO mitm, got: {sql}"
+        );
+        // mitm has 3 columns (cis, atc_code, detail_url) — drug_name is normalized but not stored
+        assert_eq!(
+            count_params(&sql),
+            3,
+            "Expected 3 params for mitm, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_has_links() {
+        let sql = insert_sql(BDPMFile::HAS_LiensPageCT_bdpm);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO has_links"),
+            "Expected INSERT OR IGNORE INTO has_links, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            2,
+            "Expected 2 params for has_links, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_insert_sql_safety_alerts() {
+        let sql = insert_sql(BDPMFile::CIS_InfoImportantes);
+        assert!(
+            sql.contains("INSERT OR IGNORE INTO safety_alerts"),
+            "Expected INSERT OR IGNORE INTO safety_alerts, got: {sql}"
+        );
+        assert_eq!(
+            count_params(&sql),
+            5,
+            "Expected 5 params for safety_alerts, got: {sql}"
+        );
+    }
+
+    // Test that normalized row value counts match SQL placeholder counts
+    // We test this by creating a minimal ValidatedRow per file type and checking
+    // that the values vec length matches the SQL param count.
+
+    fn make_validated_row(fields: Vec<&str>) -> crate::parse::ValidatedRow {
+        crate::parse::ValidatedRow {
+            fields: fields.into_iter().map(String::from).collect(),
+            line_number: 1,
+        }
+    }
+
+    #[test]
+    fn test_insert_sql_value_counts_match() {
+        // (BDPMFile, field_count, expected_values)
+        // NOTE: CIS_MITM is excluded — normalize_row includes drug_name (4 values)
+        // but the mitm table only has 3 columns (cis, atc_code, detail_url).
+        // drug_name is normalized but dropped at import time.
+        let cases: Vec<(BDPMFile, usize)> = vec![
+            (BDPMFile::CIS_bdpm, 12),
+            (BDPMFile::CIS_CIP_bdpm, 12),
+            (BDPMFile::CIS_COMPO_bdpm, 8),
+            (BDPMFile::CIS_HAS_SMR_bdpm, 6),
+            (BDPMFile::CIS_HAS_ASMR_bdpm, 6),
+            (BDPMFile::CIS_GENER_bdpm, 5),
+            (BDPMFile::CIS_CPD_bdpm, 2),
+            (BDPMFile::CIS_CIP_Dispo_Spec, 8),
+            (BDPMFile::CIS_MITM, 4),              // raw has 4 fields, normalize produces 3 values (drug_name dropped)
+            (BDPMFile::HAS_LiensPageCT_bdpm, 2),
+            (BDPMFile::CIS_InfoImportantes, 4),
+        ];
+
+        for (file, field_count) in cases {
+            let fields: Vec<&str> = (0..field_count).map(|_| "").collect();
+            let row = make_validated_row(fields);
+            let normalized = normalize_row(file, &row);
+            let sql = insert_sql(file);
+            let param_count = count_params(&sql);
+
+            assert_eq!(
+                normalized.values.len(),
+                param_count,
+                "File {:?}: {} values vs {} SQL params — MISMATCH",
+                file, normalized.values.len(), param_count
+            );
+        }
     }
 }
 

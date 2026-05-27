@@ -1,4 +1,5 @@
 use crate::api::AppState;
+use super::sort_clause;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -12,18 +13,6 @@ use utoipa::{IntoParams, ToSchema};
 
 const DEFAULT_ATC_SORT: &str = "atc_code";
 
-/// Whitelist-based sort helper — safely builds ORDER BY clause from user input
-fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&str, &str)]) -> String {
-    let col = sort
-        .and_then(|s| allowed.iter().find(|(k, _)| *k == s))
-        .map(|(_, v)| *v)
-        .unwrap_or(allowed[0].1);
-    let dir = match order {
-        Some("desc") => "DESC",
-        _ => "ASC",
-    };
-    format!("ORDER BY {} {}", col, dir)
-}
 
 #[derive(Deserialize, IntoParams)]
 pub struct AtcDetailParams {

@@ -60,4 +60,21 @@ mod tests {
     fn test_double_space() {
         assert_eq!(normalize_spaces("PARACETAMOL  1000  mg"), "PARACETAMOL 1000 mg");
     }
+
+    #[test]
+    fn test_strip_cip_ean_13_digit_non_34009() {
+        // 13-digit EAN not starting with 34009 — kept as-is
+        assert_eq!(strip_cip_ean("1234567890123"), "1234567890123");
+    }
+
+    #[test]
+    fn test_strip_cip_ean_7_digit() {
+        // 7-digit CIP kept as-is
+        assert_eq!(strip_cip_ean("3000001"), "3000001");
+    }
+
+    #[test]
+    fn test_strip_cip_ean_empty() {
+        assert_eq!(strip_cip_ean(""), "");
+    }
 }

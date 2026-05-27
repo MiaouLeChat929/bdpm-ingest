@@ -88,3 +88,103 @@ impl StateStore {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn temp_dir() -> TempDir {
+        TempDir::new().unwrap()
+    }
+
+    fn temp_state_path(tmpdir: &TempDir) -> PathBuf {
+        tmpdir.path().join("state.json")
+    }
+
+    // Test 1: load_or_create returns default when no file exists
+    #[test]
+    fn test_load_or_create_no_file() {
+        let tmpdir = temp_dir();
+        let path = temp_state_path(&tmpdir);
+
+        let store = StateStore::load_or_create(&path).unwrap();
+        assert!(store.files.is_empty());
+    }
+
+    // Test 2: load_or_create resets to default on corrupt JSON
+    #[test]
+    fn test_load_or_create_corrupt_json() {
+        let tmpdir = temp_dir();
+        let path = temp_state_path(&tmpdir);
+
+        // Write corrupt JSON
+        std::fs::write(&path, "not valid json {{{{").unwrap();
+
+        let store = StateStore::load_or_create(&path).unwrap();
+        assert!(store.files.is_empty());
+    }
+
+    // Test 3: save then load produces identical state
+    #[test]
+    fn test_save_and_load_roundtrip() {
+        let tmpdir = temp_dir();
+        let path = temp_state_path(&tmpdir);
+
+        let mut store = StateStore::load_or_create(&path).unwrap();
+        store.mark_updated(&BDPMFile::CIS_bdpm, "abc123", 1024);
+
+        store.save(&path).unwrap();
+
+        let loaded = StateStore::load_or_create(&path).unwrap();
+        assert_eq!(loaded.files.len(), 1);
+        assert_eq!(loaded.files["CIS_bdpm.txt"].content_hash, "abc123");
+        assert_eq!(loaded.files["CIS_bdpm.txt"].size_bytes, 1024);
+    }
+
+    // Test 4: needs_update returns true when no prior state
+    #[test]
+    fn test_needs_update_no_prior_state() {
+        let store = StateStore::default();
+        assert!(store.needs_update(&BDPMFile::CIS_bdpm, "abc123", 1024));
+    }
+
+    // Test 5: needs_update returns true when hash differs
+    #[test]
+    fn test_needs_update_hash_changed() {
+        let mut store = StateStore::default();
+        store.mark_updated(&BDPMFile::CIS_bdpm, "old_hash", 1024);
+
+        assert!(store.needs_update(&BDPMFile::CIS_bdpm, "new_hash", 1024));
+    }
+
+    // Test 6: needs_update returns true when size differs
+    #[test]
+    fn test_needs_update_size_changed() {
+        let mut store = StateStore::default();
+        store.mark_updated(&BDPMFile::CIS_bdpm, "abc123", 1024);
+
+        assert!(store.needs_update(&BDPMFile::CIS_bdpm, "abc123", 2048));
+    }
+
+    // Test 7: needs_update returns false when hash and size match
+    #[test]
+    fn test_needs_update_identical() {
+        let mut store = StateStore::default();
+        store.mark_updated(&BDPMFile::CIS_bdpm, "abc123", 1024);
+
+        assert!(!store.needs_update(&BDPMFile::CIS_bdpm, "abc123", 1024));
+    }
+
+    // Test 8: mark_updated prevents needs_update from returning true
+    #[test]
+    fn test_mark_updated_prevents_needs_update() {
+        let mut store = StateStore::default();
+        let hash = "final_hash";
+        let size = 4096;
+
+        store.mark_updated(&BDPMFile::CIS_bdpm, hash, size);
+        assert!(!store.needs_update(&BDPMFile::CIS_bdpm, hash, size));
+    }
+}

@@ -301,4 +301,23 @@ mod tests {
     fn cis_bdpm_has_12_fields() {
         assert_eq!(CIS_BDPM.field_count, 12);
     }
+
+    #[test]
+    fn test_all_files_order_drugs_first() {
+        let all = BDPMFile::all();
+        assert_eq!(all[0], BDPMFile::CIS_bdpm);
+    }
+
+    #[test]
+    fn test_weekly_returns_dispo_only() {
+        let weekly = BDPMFile::weekly();
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0], BDPMFile::CIS_CIP_Dispo_Spec);
+    }
+
+    #[test]
+    fn test_monthly_returns_all() {
+        let monthly = BDPMFile::monthly();
+        assert_eq!(monthly.len(), 11);
+    }
 }

@@ -23,7 +23,6 @@ pub struct HealthResponse {
     drug_count: i64,
 }
 
-/// Build the axum Router with all routes. Used by both run_server and tests.
 pub fn build_app(db_path: PathBuf) -> Router {
     let state = AppState { db_path };
     Router::new()
@@ -39,6 +38,19 @@ pub fn build_app(db_path: PathBuf) -> Router {
         .route("/atc/{code}", get(atc::atc_detail))
         .route("/availability", get(availability::availability))
         .with_state(state)
+}
+
+/// Whitelist-based sort helper — safely builds ORDER BY clause from user input
+pub(crate) fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&str, &str)]) -> String {
+    let col = sort
+        .and_then(|s| allowed.iter().find(|(k, _)| *k == s))
+        .map(|(_, v)| *v)
+        .unwrap_or(allowed[0].1);
+    let dir = match order {
+        Some("desc") => "DESC",
+        _ => "ASC",
+    };
+    format!("ORDER BY {} {}", col, dir)
 }
 
 /// Start the axum HTTP server on the given address.
@@ -86,4 +98,39 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         last_import: result.0,
         drug_count: result.1,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sort_clause_valid_sort() {
+        let allowed = [("name", "d.name"), ("form", "d.form")];
+        assert_eq!(sort_clause(Some("form"), None, &allowed), "ORDER BY d.form ASC");
+    }
+
+    #[test]
+    fn test_sort_clause_invalid_sort_fallback() {
+        let allowed = [("name", "d.name"), ("form", "d.form")];
+        assert_eq!(sort_clause(Some("bogus"), None, &allowed), "ORDER BY d.name ASC");
+    }
+
+    #[test]
+    fn test_sort_clause_desc() {
+        let allowed = [("name", "d.name"), ("form", "d.form")];
+        assert_eq!(sort_clause(Some("name"), Some("desc"), &allowed), "ORDER BY d.name DESC");
+    }
+
+    #[test]
+    fn test_sort_clause_default_asc() {
+        let allowed = [("name", "d.name")];
+        assert_eq!(sort_clause(Some("name"), None, &allowed), "ORDER BY d.name ASC");
+    }
+
+    #[test]
+    fn test_sort_clause_none_sort() {
+        let allowed = [("name", "d.name"), ("form", "d.form")];
+        assert_eq!(sort_clause(None, None, &allowed), "ORDER BY d.name ASC");
+    }
 }

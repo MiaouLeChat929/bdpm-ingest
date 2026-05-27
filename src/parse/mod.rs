@@ -86,3 +86,78 @@ pub fn count_rows(path: &std::path::Path) -> anyhow::Result<usize> {
     let bytes = std::fs::read(path)?;
     Ok(bytes.iter().filter(|&&b| b == b'\n').count())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_trailing_empty_single() {
+        let fields = vec!["a".to_string(), "b".to_string(), "".to_string()];
+        let result = strip_one_trailing_empty(fields);
+        assert_eq!(result, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn test_strip_trailing_empty_no_trailing() {
+        let fields = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let result = strip_one_trailing_empty(fields.clone());
+        assert_eq!(result, fields);
+    }
+
+    #[test]
+    fn test_strip_trailing_empty_preserves_middle_empty() {
+        let fields = vec!["a".to_string(), "".to_string(), "c".to_string(), "".to_string()];
+        let result = strip_one_trailing_empty(fields);
+        assert_eq!(result, vec!["a".to_string(), "".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn test_strip_trailing_empty_empty_vec() {
+        let fields: Vec<String> = vec![];
+        let result = strip_one_trailing_empty(fields.clone());
+        assert_eq!(result, fields);
+    }
+
+    #[test]
+    fn test_strip_trailing_empty_only_empty() {
+        let fields = vec!["".to_string()];
+        let result = strip_one_trailing_empty(fields);
+        assert_eq!(result, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_parse_file_short_row_padding() {
+        // Row with fewer fields than expected gets padded with empty strings
+        // Threshold is >= half of expected field_count (half of 12 = 6)
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // 6 fields (meets half threshold), will be padded to 12
+        std::fs::write(tmp.path(), "field1\tfield2\tfield3\tfield4\tfield5\tfield6\n").unwrap();
+        let rows = parse_file(tmp.path(), BDPMFile::CIS_bdpm).unwrap();
+        assert_eq!(rows.len(), 1);
+        // CIS_bdpm has 12 fields, we gave 6 -> padded to 12
+        assert_eq!(rows[0].fields.len(), 12);
+    }
+
+    #[test]
+    fn test_parse_file_exact_half_fields() {
+        // Row with exactly half the fields gets padded
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // CIS_bdpm has 12 fields, half is 6
+        std::fs::write(tmp.path(), "field1\tfield2\tfield3\tfield4\tfield5\tfield6\n").unwrap();
+        let rows = parse_file(tmp.path(), BDPMFile::CIS_bdpm).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].fields.len(), 12);
+    }
+
+    #[test]
+    fn test_parse_file_more_fields_than_expected() {
+        // Row with more fields than expected is kept as-is
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "field1\tfield2\tfield3\tfield4\tfield5\tfield6\tfield7\tfield8\tfield9\tfield10\tfield11\tfield12\tfield13\tfield14\tfield15\n").unwrap();
+        let rows = parse_file(tmp.path(), BDPMFile::CIS_bdpm).unwrap();
+        assert_eq!(rows.len(), 1);
+        // More fields kept as-is (15 fields)
+        assert_eq!(rows[0].fields.len(), 15);
+    }
+}
