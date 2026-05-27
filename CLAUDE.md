@@ -8,11 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests (31 tests in normalize, parse modules)
+# Unit tests (46 tests in normalize, parse, dedup, cache modules)
 cargo test --lib
 
-# Integration tests (29 tests)
+# Integration tests (34 tests against real DB)
 cargo test --test integration
+
+# Server tests (19 HTTP endpoint smoke tests)
+cargo test --test server_integration
 
 # All tests
 cargo test
@@ -22,6 +25,9 @@ cargo check
 
 # Lint
 cargo clippy -- -D warnings
+
+# Regenerate OpenAPI spec (commit after regenerating)
+./target/release/bdpm-ingest dump-open-api > openapi.yaml
 ```
 
 Single test: `cargo test test_name_here --lib`

@@ -193,6 +193,7 @@ fn import_file(
                         v[9].as_deref().unwrap_or(""),
                         v[10].as_deref().unwrap_or(""),
                         v[11].as_deref().unwrap_or(""),
+                        v[12].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_CIP_bdpm => {
@@ -205,6 +206,7 @@ fn import_file(
                         v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
                         v[10].as_deref().unwrap_or(""), v[11].as_deref().unwrap_or(""),
                         v[12].as_deref().unwrap_or(""), v[13].as_deref().unwrap_or(""),
+                        v[14].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_COMPO_bdpm => {
@@ -214,6 +216,7 @@ fn import_file(
                         v[2].as_deref().unwrap_or(""), v[3].as_deref().unwrap_or(""),
                         v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
                         v[6].as_deref().unwrap_or(""), v[7].as_deref().unwrap_or(""),
+                        v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm => {
@@ -328,16 +331,16 @@ fn import_file(
 fn insert_sql(file: BDPMFile) -> String {
     match file {
         BDPMFile::CIS_bdpm => {
-            "INSERT OR REPLACE INTO drugs (cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)".into()
+            "INSERT OR REPLACE INTO drugs (cis, name_raw, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)".into()
         }
         BDPMFile::CIS_CIP_bdpm => {
-            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, reimb_conditions, ean13, reimbursable)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)".into()
+            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, reimb_conditions, ean13, reimbursable)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)".into()
         }
         BDPMFile::CIS_COMPO_bdpm => {
-            "INSERT OR IGNORE INTO compositions (cis, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)".into()
+            "INSERT OR IGNORE INTO compositions (cis, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq, substance_name_clean, dosage_mg)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)".into()
         }
         BDPMFile::CIS_HAS_SMR_bdpm => {
             "INSERT OR IGNORE INTO smr (cis, ct_id, decision_type, decision_date, level, avis)

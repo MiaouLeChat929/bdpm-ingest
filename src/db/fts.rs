@@ -11,6 +11,9 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE VIRTUAL TABLE IF NOT EXISTS drugs_fts USING fts5(
             cis,
             name,
+            name_clean,
+            atc_code,
+            substance_name_clean,
             form,
             lab_name,
             content='drugs',
@@ -18,25 +21,25 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
 
         -- Populate from drugs table
-        INSERT INTO drugs_fts(rowid, cis, name, form, lab_name)
-        SELECT rowid, cis, name, form, lab_name FROM drugs;
+        INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
+        SELECT d.rowid, d.cis, d.name_raw, d.name, d.atc_code, '', d.form, d.lab_name FROM drugs d;
 
         -- Sync triggers
         CREATE TRIGGER IF NOT EXISTS drugs_ai AFTER INSERT ON drugs BEGIN
-            INSERT INTO drugs_fts(rowid, cis, name, form, lab_name)
-            VALUES (new.rowid, new.cis, new.name, new.form, new.lab_name);
+            INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
+            VALUES (new.rowid, new.cis, new.name_raw, new.name, new.atc_code, '', new.form, new.lab_name);
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_ad AFTER DELETE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, form, lab_name)
-            VALUES ('delete', old.rowid, old.cis, old.name, old.form, old.lab_name);
+            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
+            VALUES ('delete', old.rowid, old.cis, old.name_raw, old.name, old.atc_code, '', old.form, old.lab_name);
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_au AFTER UPDATE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, form, lab_name)
-            VALUES ('delete', old.rowid, old.cis, old.name, old.form, old.lab_name);
-            INSERT INTO drugs_fts(rowid, cis, name, form, lab_name)
-            VALUES (new.rowid, new.cis, new.name, new.form, new.lab_name);
+            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
+            VALUES ('delete', old.rowid, old.cis, old.name_raw, old.name, old.atc_code, '', old.form, old.lab_name);
+            INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
+            VALUES (new.rowid, new.cis, new.name_raw, new.name, new.atc_code, '', new.form, new.lab_name);
         END;
     "#)?;
     Ok(())

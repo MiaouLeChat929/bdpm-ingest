@@ -43,6 +43,7 @@ fn normalize_cis_bdpm(f: &[String]) -> NormalizedRow {
         table: "drugs",
         values: vec![
             Some(f[0].clone()),  // cis
+            Some(f[1].clone()),  // name_raw (original, before normalization)
             Some(normalize_spaces(&strip_field(&f[1]))),  // name (strip + normalize double-spaces)
             Some(strip_field(&f[2])),  // form
             Some(strip_field(&f[3])),  // route
@@ -62,6 +63,63 @@ fn strip_eu_slash(s: &str) -> String {
     s.trim_end_matches('/').to_string()
 }
 
+/// Parse French dosage text to numeric mg equivalent.
+/// Examples:
+/// - "1000 mg" → Some(1000.0)
+/// - "1,00 g" → Some(1000.0)
+/// - "250 microg" → Some(0.25)
+/// - "10 UI" → None (non-weight units)
+/// - "" → None
+fn parse_dosage_mg(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Normalize: lowercase and handle common variations
+    let normalized = trimmed.to_lowercase();
+
+    // Check for non-weight units (UI, etc.) — return None
+    if normalized.contains("ui") || normalized.contains("unite") || normalized.contains("million") {
+        return None;
+    }
+
+    // Parse micrograms: "250 microg", "250 µg", "250 mcg"
+    if normalized.contains("micro") || normalized.contains("µg") || normalized.contains("mcg") {
+        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
+        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
+            return Some((val / 1000.0).to_string());
+        }
+        return None;
+    }
+
+    // Parse grams: "1,00 g", "1 g"
+    if normalized.contains('g') && !normalized.contains("microg") {
+        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
+        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
+            return Some((val * 1000.0).to_string());
+        }
+        return None;
+    }
+
+    // Parse milligrams: "1000 mg", "500mg"
+    if normalized.contains("mg") {
+        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
+        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
+            return Some(val.to_string());
+        }
+        return None;
+    }
+
+    // Fallback: try plain number
+    let num_part: String = trimmed.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
+    if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
+        return Some(val.to_string());
+    }
+
+    None
+}
+
 fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
     // 12 fields (after trailing empty strip): cis, cip7, labels, pres_status, comm_status, comm_date, ean13, reimbursable, reimb_rate, prix_ht, prix_ville, prix_rate
     NormalizedRow {
@@ -71,6 +129,7 @@ fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
             Some(strip_cip7(&f[1])),  // cip (canonical 7-digit from 34009-prefixed CIP13)
             Some(f[1].clone()),  // cip_raw
             Some(strip_field(&f[2])),  // labels
+            Some(strip_avis_html(&f[2])),  // labels_clean (HTML stripped)
             Some(strip_field(&f[3])),  // pres_status
             Some(strip_field(&f[4])),  // comm_status
             parse_date_ddmmYYYY(&f[5]).ok(),  // comm_date ISO
@@ -113,6 +172,8 @@ fn normalize_compo(f: &[String]) -> NormalizedRow {
             Some(f[5].clone()),
             Some(f[6].clone()),
             Some(f[7].clone()),
+            Some(normalize_spaces(&strip_field(&f[3]))),  // substance_name_clean
+            parse_dosage_mg(&f[4]),                       // dosage_mg (numeric mg equivalent)
         ],
     }
 }

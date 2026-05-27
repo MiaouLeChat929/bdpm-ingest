@@ -8,10 +8,25 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+/// Whitelist-based sort helper — safely builds ORDER BY clause from user input
+fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&str, &str)]) -> String {
+    let col = sort
+        .and_then(|s| allowed.iter().find(|(k, _)| *k == s))
+        .map(|(_, v)| *v)
+        .unwrap_or(allowed[0].1);
+    let dir = match order {
+        Some("desc") => "DESC",
+        _ => "ASC",
+    };
+    format!("ORDER BY {} {}", col, dir)
+}
+
 #[derive(Deserialize, IntoParams)]
 pub struct AvailParams {
     pub cis: Option<String>,
     pub status: Option<i32>,
+    pub sort: Option<String>,
+    pub order: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -49,7 +64,9 @@ impl IntoResponse for AvailabilityError {
     path = "/availability",
     params(
         ("cis" = Option<String>, Query, description = "Filter by CIS code"),
-        ("status" = Option<i32>, Query, description = "Filter by status type")
+        ("status" = Option<i32>, Query, description = "Filter by status type"),
+        ("sort" = Option<String>, Query, description = "Sort by: date_start, status_type, cis"),
+        ("order" = Option<String>, Query, description = "Sort order: asc, desc")
     ),
     responses(
         (status = 200, description = "Availability rows", body = Vec<AvailabilityRow>)
@@ -63,18 +80,24 @@ pub async fn availability(
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<AvailabilityRow>, rusqlite::Error> {
         let conn = crate::db::open_api_conn(&state.db_path)?;
 
-        let query_str: &str;
+        let allowed = [
+            ("date_start", "a.date_start"),
+            ("status_type", "a.status_type"),
+            ("cis", "a.cis"),
+        ];
+        let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
         let has_cis = params.cis.is_some();
         let has_status = params.status.is_some();
 
+        let base_select = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
+                          FROM availability a LEFT JOIN drugs d ON a.cis = d.cis";
+
         let rows = if has_cis {
-            query_str = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
-                         FROM availability a LEFT JOIN drugs d ON a.cis = d.cis
-                         WHERE a.cis = ?1
-                         ORDER BY a.date_start DESC";
-            let cis = params.cis.unwrap();
-            let mut stmt = conn.prepare(query_str)?;
-            let rows = stmt.query_map([cis], |row| Ok(AvailabilityRow {
+            let where_clause = "WHERE a.cis = ?1";
+            let sql = format!("{} {} {}", base_select, where_clause, order_by);
+            let cis = params.cis.clone().unwrap();
+            let mut stmt = conn.prepare(&sql)?;
+            let rows: Vec<AvailabilityRow> = stmt.query_map([cis], |row| Ok(AvailabilityRow {
                 cis: row.get(0)?,
                 name: row.get(1)?,
                 cip: row.get(2)?,
@@ -82,17 +105,14 @@ pub async fn availability(
                 status: row.get(4)?,
                 date_start: row.get(5)?,
                 date_remise: row.get(6)?,
-            }))?;
-            rows.collect::<Result<Vec<_>, _>>()?
+            }))?.collect::<Result<Vec<_>, _>>()?;
+            rows
         } else if has_status {
-            query_str = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
-                         FROM availability a LEFT JOIN drugs d ON a.cis = d.cis
-                         WHERE a.status_type = ?1
-                         ORDER BY a.date_start DESC
-                         LIMIT 200";
+            let where_clause = "WHERE a.status_type = ?1";
+            let sql = format!("{} {} {} LIMIT 200", base_select, where_clause, order_by);
             let status = params.status.unwrap();
-            let mut stmt = conn.prepare(query_str)?;
-            let rows = stmt.query_map([status], |row| Ok(AvailabilityRow {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows: Vec<AvailabilityRow> = stmt.query_map([status], |row| Ok(AvailabilityRow {
                 cis: row.get(0)?,
                 name: row.get(1)?,
                 cip: row.get(2)?,
@@ -100,24 +120,21 @@ pub async fn availability(
                 status: row.get(4)?,
                 date_start: row.get(5)?,
                 date_remise: row.get(6)?,
-            }))?;
-            rows.collect::<Result<Vec<_>, _>>()?
+            }))?.collect::<Result<Vec<_>, _>>()?;
+            rows
         } else {
-            query_str = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
-                         FROM availability a LEFT JOIN drugs d ON a.cis = d.cis
-                         ORDER BY a.date_start DESC
-                         LIMIT 200";
-            let mut stmt = conn.prepare(query_str)?;
-            let rows = stmt.query_map([], |row| Ok(AvailabilityRow {
+            let sql = format!("{} {} LIMIT 200", base_select, order_by);
+            let mut stmt = conn.prepare(&sql)?;
+            let rows: Vec<AvailabilityRow> = stmt.query_map([], |row| Ok(AvailabilityRow {
                 cis: row.get(0)?,
                 name: row.get(1)?,
+                cip: row.get(2)?,
                 status_type: row.get(3)?,
                 status: row.get(4)?,
                 date_start: row.get(5)?,
                 date_remise: row.get(6)?,
-                cip: row.get(2)?,
-            }))?;
-            rows.collect::<Result<Vec<_>, _>>()?
+            }))?.collect::<Result<Vec<_>, _>>()?;
+            rows
         };
         Ok(rows)
     }).await.map_err(|_| AvailabilityError::Internal("Internal server error".to_string()))?

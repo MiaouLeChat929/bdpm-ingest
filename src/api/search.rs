@@ -4,11 +4,26 @@ use rusqlite::params;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
+/// Whitelist-based sort helper — safely builds ORDER BY clause from user input
+fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&str, &str)]) -> String {
+    let col = sort
+        .and_then(|s| allowed.iter().find(|(k, _)| *k == s))
+        .map(|(_, v)| *v)
+        .unwrap_or(allowed[0].1);
+    let dir = match order {
+        Some("desc") => "DESC",
+        _ => "ASC",
+    };
+    format!("ORDER BY {} {}", col, dir)
+}
+
 #[derive(Deserialize, IntoParams)]
 pub struct SearchParams {
     pub q: String,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    pub sort: Option<String>,
+    pub order: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -32,7 +47,9 @@ pub struct DrugSearchResult {
     path = "/drugs",
     params(
         ("q" = String, Query, description = "Search query"),
-        ("limit" = Option<usize>, Query, description = "Max results (default 20)")
+        ("limit" = Option<usize>, Query, description = "Max results (default 20)"),
+        ("sort" = Option<String>, Query, description = "Sort by: name, form, lab_name, atc_code"),
+        ("order" = Option<String>, Query, description = "Sort order: asc, desc")
     ),
     responses(
         (status = 200, description = "List of matching drugs", body = Vec<DrugSearchResult>)
@@ -58,9 +75,22 @@ pub async fn search_drugs(
             Err(_) => return vec![],
         };
 
-        let mut stmt = match conn.prepare(
-            "SELECT cis, name, form, lab_name FROM drugs_fts WHERE drugs_fts MATCH ?1 LIMIT ?2"
-        ) {
+        // Sort clause for results after FTS5 matching
+        let allowed = [
+            ("name", "d.name"),
+            ("form", "d.form"),
+            ("lab_name", "d.lab_name"),
+            ("atc_code", "d.atc_code"),
+        ];
+        let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
+
+        let sql = format!(
+            "SELECT d.cis, d.name, d.form, d.lab_name FROM drugs d \
+             INNER JOIN drugs_fts fts ON d.cis = fts.cis WHERE drugs_fts MATCH ?1 {} LIMIT ?2",
+            order_by
+        );
+
+        let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return vec![],
         };

@@ -1,13 +1,35 @@
 use crate::api::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use rusqlite::params;
+use serde::Deserialize;
 use serde::Serialize;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
+
+const DEFAULT_ATC_SORT: &str = "atc_code";
+
+/// Whitelist-based sort helper — safely builds ORDER BY clause from user input
+fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&str, &str)]) -> String {
+    let col = sort
+        .and_then(|s| allowed.iter().find(|(k, _)| *k == s))
+        .map(|(_, v)| *v)
+        .unwrap_or(allowed[0].1);
+    let dir = match order {
+        Some("desc") => "DESC",
+        _ => "ASC",
+    };
+    format!("ORDER BY {} {}", col, dir)
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct AtcDetailParams {
+    pub sort: Option<String>,
+    pub order: Option<String>,
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct AtcCode {
@@ -69,7 +91,9 @@ pub async fn atc_top_level(
     get,
     path = "/atc/{code}",
     params(
-        ("code" = String, Path, description = "ATC code")
+        ("code" = String, Path, description = "ATC code"),
+        ("sort" = Option<String>, Query, description = "Sort children by: atc_code, drugs_count"),
+        ("order" = Option<String>, Query, description = "Sort order: asc, desc")
     ),
     responses(
         (status = 200, description = "ATC detail with children and drug count", body = AtcDetail)
@@ -78,6 +102,7 @@ pub async fn atc_top_level(
 )]
 pub async fn atc_detail(
     Path(code): Path<String>,
+    Query(params): Query<AtcDetailParams>,
     State(state): State<AppState>,
 ) -> Result<Json<AtcDetail>, AtcError> {
     let detail = tokio::task::spawn_blocking(move || -> Result<AtcDetail, rusqlite::Error> {
@@ -99,10 +124,24 @@ pub async fn atc_detail(
             _ => return Ok(AtcDetail { atc_code, parent_1_char: parent, children: vec![], drugs_count: 0 }),
         };
         let prefix = format!("{}%", atc_code);
-        let mut stmt = conn.prepare(
-            "SELECT atc_code FROM atc_codes WHERE atc_code LIKE ?1 AND LENGTH(atc_code) = ?2 ORDER BY atc_code"
-        )?;
-        let children = stmt.query_map(params![prefix, child_len], |row| {
+
+        let allowed = [
+            ("atc_code", "a.atc_code"),
+            ("drugs_count", "COALESCE(m.drugs_count, 0)"),
+        ];
+        let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
+
+        let children_sql = format!(
+            "SELECT a.atc_code FROM atc_codes a \
+             LEFT JOIN (SELECT atc_code, COUNT(DISTINCT cis) as drugs_count \
+                        FROM mitm WHERE atc_code LIKE ?1 GROUP BY atc_code) m \
+             ON a.atc_code = m.atc_code \
+             WHERE a.atc_code LIKE ?1 AND LENGTH(a.atc_code) = ?2 \
+             {}",
+            order_by
+        );
+        let mut stmt = conn.prepare(&children_sql)?;
+        let children = stmt.query_map(params![&prefix, child_len], |row| {
             row.get::<_, String>(0)
         })?.collect::<Result<Vec<_>, _>>()?;
 
