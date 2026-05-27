@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests (153 tests across all modules)
+# Unit tests (154 tests across all modules)
 cargo test --lib
 
 # Integration tests (34 tests against real DB)

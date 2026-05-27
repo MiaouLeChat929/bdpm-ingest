@@ -80,13 +80,13 @@ pub fn run_import(
             }
         };
 
-        // Normalize
+        // Normalize (homeopathic drugs return None and are dropped)
         let mut normalized: Vec<_> = raw_rows
             .iter()
-            .map(|row| {
-                let mut nr = normalize_row(file, row);
+            .filter_map(|row| {
+                let mut nr = normalize_row(file, row)?;
                 normalize_apostrophes(&mut nr);
-                nr
+                Some(nr)
             })
             .collect();
 
@@ -638,7 +638,7 @@ mod insert_sql_tests {
         for (file, field_count) in cases {
             let fields: Vec<&str> = (0..field_count).map(|_| "").collect();
             let row = make_validated_row(fields);
-            let normalized = normalize_row(file, &row);
+            let normalized = normalize_row(file, &row).expect("non-homeopathic rows should return Some");
             let sql = insert_sql(file);
             let param_count = count_params(&sql);
 

@@ -11,21 +11,28 @@ pub use html::strip_avis_html;
 pub use dedup::dedup_compo;
 
 /// Normalize a row from a BDPMFile based on field type.
-/// Returns a normalized Vec of String fields ready for INSERT.
-pub fn normalize_row(file: crate::download::manifest::BDPMFile, row: &crate::parse::ValidatedRow) -> NormalizedRow {
+/// Returns `None` for homeopathic drugs (procedure_type contains "ENREG HOM").
+/// All other rows return `Some(NormalizedRow)`.
+pub fn normalize_row(file: crate::download::manifest::BDPMFile, row: &crate::parse::ValidatedRow) -> Option<NormalizedRow> {
     let f = &row.fields;
     match file {
-        crate::download::manifest::BDPMFile::CIS_bdpm => normalize_cis_bdpm(f),
-        crate::download::manifest::BDPMFile::CIS_CIP_bdpm => normalize_cis_cip(f),
-        crate::download::manifest::BDPMFile::CIS_COMPO_bdpm => normalize_compo(f),
-        crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm => normalize_smr(f),
-        crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm => normalize_asmr(f),
-        crate::download::manifest::BDPMFile::CIS_GENER_bdpm => normalize_gener(f),
-        crate::download::manifest::BDPMFile::CIS_CPD_bdpm => normalize_cpd(f),
-        crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec => normalize_dispo(f),
-        crate::download::manifest::BDPMFile::CIS_MITM => normalize_mitm(f),
-        crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm => normalize_liens(f),
-        crate::download::manifest::BDPMFile::CIS_InfoImportantes => normalize_info_importantes(f),
+        crate::download::manifest::BDPMFile::CIS_bdpm => {
+            // Filter homeopathic drugs at the source
+            if f.get(5).map(|s| s.to_uppercase().contains("ENREG HOM")).unwrap_or(false) {
+                return None;
+            }
+            Some(normalize_cis_bdpm(f))
+        }
+        crate::download::manifest::BDPMFile::CIS_CIP_bdpm => Some(normalize_cis_cip(f)),
+        crate::download::manifest::BDPMFile::CIS_COMPO_bdpm => Some(normalize_compo(f)),
+        crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm => Some(normalize_smr(f)),
+        crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm => Some(normalize_asmr(f)),
+        crate::download::manifest::BDPMFile::CIS_GENER_bdpm => Some(normalize_gener(f)),
+        crate::download::manifest::BDPMFile::CIS_CPD_bdpm => Some(normalize_cpd(f)),
+        crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec => Some(normalize_dispo(f)),
+        crate::download::manifest::BDPMFile::CIS_MITM => Some(normalize_mitm(f)),
+        crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm => Some(normalize_liens(f)),
+        crate::download::manifest::BDPMFile::CIS_InfoImportantes => Some(normalize_info_importantes(f)),
     }
 }
 
@@ -451,7 +458,7 @@ mod tests {
             "EU/1/17/1235/",      // f[11]: eu_number (with trailing slash)
         ]);
 
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "drugs");
         assert_eq!(result.values.len(), 13);
@@ -501,7 +508,7 @@ mod tests {
             "EU/1/17/1235/",
         ]);
 
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
 
         // name_raw should preserve original whitespace
         assert_eq!(result.values[1], Some(" Doliprane ".to_string()));
@@ -526,7 +533,7 @@ mod tests {
             "EU/1/17/1235/",
         ]);
 
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
 
         // lab_name should have whitespace stripped
         assert_eq!(result.values[9], Some("SANOFI".to_string()));
@@ -549,7 +556,7 @@ mod tests {
             "Oui",                 // f[10]: is_patent
             "EU/1/17/1235/",
         ]);
-        let result_oui = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui);
+        let result_oui = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui).unwrap();
         assert_eq!(result_oui.values[10], Some("1".to_string()));
 
         // Test "Non" → "0"
@@ -567,7 +574,7 @@ mod tests {
             "Non",                // f[10]: is_patent
             "EU/1/17/1235/",
         ]);
-        let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non);
+        let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non).unwrap();
         assert_eq!(result_non.values[10], Some("0".to_string()));
     }
 
@@ -588,7 +595,7 @@ mod tests {
             "Oui",
             "EU/1/17/1235/",      // f[11]: eu_number with trailing slash
         ]);
-        let result_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_slash);
+        let result_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_slash).unwrap();
         assert_eq!(result_slash.values[12], Some("EU/1/17/1235".to_string()));
 
         // Test without trailing slash
@@ -606,7 +613,7 @@ mod tests {
             "Oui",
             "EU/1/17/1235",       // f[11]: eu_number without trailing slash
         ]);
-        let result_no_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_no_slash);
+        let result_no_slash = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_no_slash).unwrap();
         assert_eq!(result_no_slash.values[12], Some("EU/1/17/1235".to_string()));
     }
 
@@ -627,7 +634,7 @@ mod tests {
             "Oui",
             "EU/1/17/1235/",
         ]);
-        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_empty);
+        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_empty).unwrap();
         assert_eq!(result_empty.values[11], None);
 
         // Test non-empty alert_type → Some
@@ -645,8 +652,29 @@ mod tests {
             "Oui",
             "EU/1/17/1235/",
         ]);
-        let result_with_alert = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_with_alert);
+        let result_with_alert = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_with_alert).unwrap();
         assert_eq!(result_with_alert.values[11], Some("Rupture de stock".to_string()));
+    }
+
+    #[test]
+    fn test_normalize_cis_bdpm_homeopathy_filtered() {
+        // Homeopathic procedure_type → None (filtered out)
+        let row_homeo = make_cis_bdpm_row([
+            "60004971", "Doliprane", "comprimé", "orale",
+            "Autorisation active",
+            "Enreg homeo (Proc. Nat.)",  // f[5]: homeopathic procedure type
+            "Commercialisée", "12/03/1998", "", "BOIRON", "Non", "",
+        ]);
+        assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_homeo).is_none());
+
+        // Non-homeopathic procedure_type → Some
+        let row_normal = make_cis_bdpm_row([
+            "60004971", "Doliprane", "comprimé", "orale",
+            "Autorisation active",
+            "Procédure nationale",       // f[5]: normal procedure type
+            "Commercialisée", "12/03/1998", "", "SANOFI", "Oui", "",
+        ]);
+        assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_normal).is_some());
     }
 
     // --- normalize_dispo tests (via normalize_row) ---
@@ -671,7 +699,7 @@ mod tests {
             "",                           // f[6]: date_remise (empty)
             "https://ansm.gouv.fr/disp",  // f[7]: source_url
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row).unwrap();
         assert_eq!(result.table, "availability");
         assert_eq!(result.values[0], Some("60004971".to_string()));
         assert_eq!(result.values[1], Some("3400930000017".to_string()));
@@ -688,7 +716,7 @@ mod tests {
         let row = make_dispo_row([
             "60004971", "", "1", "Rupture", "01/05/2026", "", "", "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row).unwrap();
         assert_eq!(result.values[1], Some("".to_string())); // empty cip13 preserved as empty string
         assert_eq!(result.values[5], None); // empty date_end → None
         assert_eq!(result.values[6], None); // empty date_remise → None
@@ -700,7 +728,7 @@ mod tests {
         let row = make_dispo_row([
             "60004971", "", "abc", "Unknown", "01/05/2026", "", "", "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row).unwrap();
         assert_eq!(result.values[2], None); // non-numeric status_type → None
     }
 
@@ -722,7 +750,7 @@ mod tests {
             "31/12/2026",
             "Alerte de sécurité importante https://ansm.gouv.fr/alarm/123",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
         assert_eq!(result.table, "safety_alerts");
         assert_eq!(result.values[0], Some("60004971".to_string()));
         assert_eq!(result.values[1], Some("2026-01-01".to_string()));
@@ -741,7 +769,7 @@ mod tests {
             "31/12/2026",
             "<p>Alerte <b>importante</b><br>Nouvelle info</p>",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
         // HTML should be stripped, no URL extracted
         assert_eq!(result.values[3], Some("Alerte importante\nNouvelle info".to_string()));
         assert_eq!(result.values[4], None); // no URL
@@ -755,7 +783,7 @@ mod tests {
             "",
             "Message sans URL",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
         assert_eq!(result.values[2], None); // empty end_date → None
         assert_eq!(result.values[3], Some("Message sans URL".to_string()));
         assert_eq!(result.values[4], None);
@@ -769,7 +797,7 @@ mod tests {
             "31/12/2026",
             "Test",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
         assert_eq!(result.values[1], None); // out-of-range date → None
     }
 
@@ -865,7 +893,7 @@ mod tests {
             "OUI",    // f[10]: uppercase — matches case-insensitively
             "EU/1/17/1235/",
         ]);
-        let result_oui_upper = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui_upper);
+        let result_oui_upper = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui_upper).unwrap();
         assert_eq!(result_oui_upper.values[10], Some("1".to_string())); // matches "oui" case-insensitively
 
         // "Non" (proper-case): is_patent is case-sensitive, "Non" != "Oui" → "0"
@@ -876,7 +904,7 @@ mod tests {
             "Non",    // f[10]: proper-case "Non" — only exact "Oui" maps to "1"
             "EU/1/17/1235/",
         ]);
-        let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non);
+        let result_non = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_non).unwrap();
         assert_eq!(result_non.values[10], Some("0".to_string()));
     }
 
@@ -922,7 +950,7 @@ mod tests {
             "",               // f[10]: prix_ville (empty)
             "",               // f[11]: prix_rate (empty)
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
         // prix_ht_cents (index 8), prix_ville_cents (index 9), prix_rate_cents (index 10)
         assert_eq!(result.values[8], None);  // empty prix_ht → None
         assert_eq!(result.values[9], None);  // empty prix_ville → None
@@ -939,7 +967,7 @@ mod tests {
             "29/11/2924",  // f[4]: date_start out of range
             "", "", "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_Dispo_Spec, &row).unwrap();
         assert_eq!(result.values[4], None); // out-of-range date → None
     }
 
@@ -971,7 +999,7 @@ mod tests {
             "6,57",                  // f[10]: prix_ville
             "5,99",                  // f[11]: prix_rate
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "presentations");
         assert_eq!(result.values.len(), 15);
@@ -1009,7 +1037,7 @@ mod tests {
             "25,99",
             "24,34",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
         assert_eq!(result.values[8], Some("2434".to_string())); // "24,34" → 2434 cents
         assert_eq!(result.values[9], Some("2599".to_string())); // "25,99" → 2599 cents
     }
@@ -1021,7 +1049,7 @@ mod tests {
             "60004971", "3400930000017", "Boite", "Prescrit", "Commercialisé",
             "12/03/1998", "3400930000017", "Oui", "65%", "", "", "",
         ]);
-        let result_pct = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_pct);
+        let result_pct = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_pct).unwrap();
         assert_eq!(result_pct.values[11], Some("0.65".to_string()));
 
         // Test reimb_rate: "65 %" (with space) → "0.65"
@@ -1029,7 +1057,7 @@ mod tests {
             "60004971", "3400930000017", "Boite", "Prescrit", "Commercialisé",
             "12/03/1998", "3400930000017", "Oui", "65 %", "", "", "",
         ]);
-        let result_space = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_space);
+        let result_space = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_space).unwrap();
         assert_eq!(result_space.values[11], Some("0.65".to_string()));
 
         // Test reimb_rate: empty → None
@@ -1037,7 +1065,7 @@ mod tests {
             "60004971", "3400930000017", "Boite", "Prescrit", "Commercialisé",
             "12/03/1998", "3400930000017", "Oui", "", "", "", "",
         ]);
-        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_empty);
+        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row_empty).unwrap();
         assert_eq!(result_empty.values[11], None);
     }
 
@@ -1057,7 +1085,7 @@ mod tests {
             "",
             "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
         assert_eq!(result.values[13], None); // ean13 → None
         assert_eq!(result.values[14], Some("Oui".to_string())); // reimbursable (not empty)
     }
@@ -1079,7 +1107,7 @@ mod tests {
             "",
             "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
         assert_eq!(result.values[1], Some("0000017".to_string())); // cip (7-digit from pos 6)
         assert_eq!(result.values[2], Some("3400930000017".to_string())); // cip_raw (full)
     }
@@ -1107,7 +1135,7 @@ mod tests {
             "SA",
             "0",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "compositions");
         assert_eq!(result.values.len(), 10);
@@ -1136,7 +1164,7 @@ mod tests {
             "SA",
             "0",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row).unwrap();
         assert_eq!(result.values[8], Some("Paracétamol 500 mg".to_string())); // double-spaces normalized
     }
 
@@ -1146,28 +1174,28 @@ mod tests {
         let row_mg = make_compo_row([
             "60004971", "Comprimé", "1124", "Paracétamol", "1000 mg", "1 comprimé", "SA", "0",
         ]);
-        let result_mg = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_mg);
+        let result_mg = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_mg).unwrap();
         assert_eq!(result_mg.values[9], Some("1000".to_string()));
 
         // Test dosage_mg: "1,00 g" → Some("1000")
         let row_g = make_compo_row([
             "60004971", "Comprimé", "1124", "Paracétamol", "1,00 g", "1 comprimé", "SA", "0",
         ]);
-        let result_g = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_g);
+        let result_g = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_g).unwrap();
         assert_eq!(result_g.values[9], Some("1000".to_string()));
 
         // Test dosage_mg: "250 microg" → Some("0.25")
         let row_microg = make_compo_row([
             "60004971", "Comprimé", "1124", "Principe actif", "250 microg", "1 comprimé", "SA", "0",
         ]);
-        let result_microg = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_microg);
+        let result_microg = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_microg).unwrap();
         assert_eq!(result_microg.values[9], Some("0.25".to_string()));
 
         // Test dosage_mg: "" → None
         let row_empty = make_compo_row([
             "60004971", "Comprimé", "1124", "Paracétamol", "", "1 comprimé", "SA", "0",
         ]);
-        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_empty);
+        let result_empty = normalize_row(crate::download::manifest::BDPMFile::CIS_COMPO_bdpm, &row_empty).unwrap();
         assert_eq!(result_empty.values[9], None);
     }
 
@@ -1192,7 +1220,7 @@ mod tests {
             "I",
             "Service médical rendu important",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "smr");
         assert_eq!(result.values.len(), 6);
@@ -1210,7 +1238,7 @@ mod tests {
         let row = make_smr_row([
             "60004971", "ct12345", "Avis", "20250101", "I", "Service médical rendu",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row).unwrap();
         assert_eq!(result.values[3], Some("2025-01-01".to_string()));
     }
 
@@ -1225,7 +1253,7 @@ mod tests {
             "I",
             "texte avec <br> saut de ligne <b>et gras</b>",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row).unwrap();
         assert_eq!(result.values[5], Some("texte avec \n saut de ligne et gras".to_string()));
     }
 
@@ -1235,7 +1263,7 @@ mod tests {
         let row = make_smr_row([
             "60004971", "ct12345", "Avis", "29241129", "I", "Service médical rendu",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_SMR_bdpm, &row).unwrap();
         assert_eq!(result.values[3], None); // out-of-range date → None
     }
 
@@ -1260,7 +1288,7 @@ mod tests {
             "II",
             "Amélioration du service rendu modérée",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "asmr");
         assert_eq!(result.values.len(), 6);
@@ -1278,14 +1306,14 @@ mod tests {
         let row = make_asmr_row([
             "60004971", "ct67890", "Avis", "20250315", "I", "Amélioration majeure",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row).unwrap();
         assert_eq!(result.values[4], Some("I".to_string()));
 
         // Test level II
         let row_ii = make_asmr_row([
             "60004971", "ct67890", "Avis", "20250315", "II", "Amélioration modérée",
         ]);
-        let result_ii = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row_ii);
+        let result_ii = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row_ii).unwrap();
         assert_eq!(result_ii.values[4], Some("II".to_string()));
     }
 
@@ -1300,7 +1328,7 @@ mod tests {
             "III",
             "texte avec <br> et <b>gras</b>",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_HAS_ASMR_bdpm, &row).unwrap();
         assert_eq!(result.values[5], Some("texte avec \n et gras".to_string()));
     }
 
@@ -1324,7 +1352,7 @@ mod tests {
             "0",
             "1",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "generic_groups");
         assert_eq!(result.values.len(), 5);
@@ -1345,7 +1373,7 @@ mod tests {
             "0",
             "1",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row).unwrap();
         assert_eq!(result.values[1], Some("Doliprane et génériques".to_string())); // double-spaces normalized
     }
 
@@ -1353,15 +1381,15 @@ mod tests {
     fn test_normalize_gener_type_normalization() {
         // Test type normalization: f[3]="0" → "reference", f[3]="1" → "generic", f[3]="4" → "sustained-release"
         let row_ref = make_gener_row(["GRP001", "Groupe ref", "60004971", "0", "1"]);
-        let result_ref = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_ref);
+        let result_ref = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_ref).unwrap();
         assert_eq!(result_ref.values[3], Some("reference".to_string()));
 
         let row_gen = make_gener_row(["GRP001", "Groupe gen", "60004972", "1", "2"]);
-        let result_gen = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_gen);
+        let result_gen = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_gen).unwrap();
         assert_eq!(result_gen.values[3], Some("generic".to_string()));
 
         let row_sr = make_gener_row(["GRP001", "Groupe SR", "60004973", "4", "3"]);
-        let result_sr = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_sr);
+        let result_sr = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_sr).unwrap();
         assert_eq!(result_sr.values[3], Some("sustained-release".to_string()));
     }
 
@@ -1369,12 +1397,12 @@ mod tests {
     fn test_normalize_gener_sort_order() {
         // Test sort_order: f[4]="1" → Some("1")
         let row = make_gener_row(["GRP001", "Groupe", "60004971", "0", "1"]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row).unwrap();
         assert_eq!(result.values[4], Some("1".to_string()));
 
         // Test invalid sort_order (non-numeric) → None
         let row_invalid = make_gener_row(["GRP001", "Groupe", "60004971", "0", "abc"]);
-        let result_invalid = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_invalid);
+        let result_invalid = normalize_row(crate::download::manifest::BDPMFile::CIS_GENER_bdpm, &row_invalid).unwrap();
         assert_eq!(result_invalid.values[4], None);
     }
 
@@ -1395,7 +1423,7 @@ mod tests {
             "60004971",
             "Médicament sujet à prescription obligatoire",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CPD_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CPD_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "prescription_rules");
         assert_eq!(result.values.len(), 2);
@@ -1406,7 +1434,7 @@ mod tests {
     #[test]
     fn test_normalize_cpd_empty_rule() {
         let row = make_cpd_row(["60004971", ""]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CPD_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CPD_bdpm, &row).unwrap();
         assert_eq!(result.values[1], Some("".to_string())); // empty rule preserved
     }
 
@@ -1428,7 +1456,7 @@ mod tests {
             "Paracétamol",
             "https://base-donnees-publique.medicaments.gouv.fr/displayDoc.php",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row).unwrap();
 
         assert_eq!(result.table, "mitm");
         assert_eq!(result.values.len(), 3);
@@ -1446,7 +1474,7 @@ mod tests {
             "",
             "https://example.com",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row).unwrap();
         assert_eq!(result.values.len(), 3);
         assert_eq!(result.values[2], Some("https://example.com".to_string()));
     }
@@ -1460,7 +1488,7 @@ mod tests {
             "Paracétamol",
             "",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::CIS_MITM, &row).unwrap();
         assert_eq!(result.values[2], None); // empty url → None
     }
 
@@ -1481,7 +1509,7 @@ mod tests {
             "ct12345",
             "https://base-donnees-publique.medicaments.gouv.fr/avis",
         ]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "has_links");
         assert_eq!(result.values.len(), 2);
@@ -1493,7 +1521,7 @@ mod tests {
     fn test_normalize_liens_empty_url() {
         // URL can be empty (preserve as empty string)
         let row = make_liens_row(["ct12345", ""]);
-        let result = normalize_row(crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm, &row);
+        let result = normalize_row(crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm, &row).unwrap();
         assert_eq!(result.values[1], Some("".to_string())); // empty url preserved
     }
 }
