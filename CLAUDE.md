@@ -104,6 +104,14 @@ tests/     integration.rs — 34 tests (price, date, normalization, referential 
 
 **FTS5 external content** — `INSERT OR REPLACE` on the drugs table does implicit DELETE+INSERT. The `content_rowid='rowid'` mapping means FTS index entries use SQLite rowid as key. When REPLACE reassigns rowids, orphaned FTS entries can accumulate. The `rebuild_fts()` function in `fts.rs` is the safety net — call it after full imports. SQLite FTS5 external content tables do not support REPLACE conflict handling natively (converts to ABORT). Triggers fire correctly but rowid stability under REPLACE is the risk.
 
+**Homeopathic drugs** — 1,634 of 15,848 drugs (10.3%) are homeopathic. Identification signals:
+- Primary: `procedure_type LIKE 'ENREG HOM%'` (1,319 drugs, official French regulatory classification)
+- Secondary: `substance_name LIKE '%HOMEOPATHIQUE%'` in compositions (1,474 drugs)
+- Union: 1,634 unique CIS codes
+- Homeopathic drugs have NO ATC codes (no MITM entries)
+- Nature field = 'SA' (not discriminatory)
+- Elimination SQL: delete from child tables first (compositions, prescription_rules, generic_groups, mitm, smr, asmr, availability, presentations, safety_alerts), then drugs. Use `INNER JOIN` in API queries for groups and availability to prevent orphan rows.
+
 **CIS_CIP_Dispo_Spec** — availability/stockout file, most frequently updated file (confirmed 19/05/2026). Polled via `bdpm-ingest poll` which parses embedded dates from the BDPM HTML listing page. The server provides no ETag, no Last-Modified, no Content-Length on TXT files.
 
 ## rusqlite Patterns (hard-won)

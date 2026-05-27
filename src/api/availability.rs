@@ -79,7 +79,7 @@ pub async fn availability(
         let has_status = params.status.is_some();
 
         let base_select = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
-                          FROM availability a LEFT JOIN drugs d ON a.cis = d.cis";
+                          FROM availability a INNER JOIN drugs d ON a.cis = d.cis";
 
         let rows = if has_cis {
             let where_clause = "WHERE a.cis = ?1";

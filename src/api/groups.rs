@@ -94,12 +94,14 @@ pub async fn list_generic_groups(
             let filter_sql = "SELECT group_id, group_name, COUNT(cis) as cis_count
                              FROM generic_groups
                              WHERE group_name LIKE ?1
-                             GROUP BY group_id, group_name";
+                             GROUP BY group_id, group_name
+                             HAVING COUNT(cis) > 0";
             (filter_sql, true)
         } else {
             let filter_sql = "SELECT group_id, group_name, COUNT(cis) as cis_count
                              FROM generic_groups
-                             GROUP BY group_id, group_name";
+                             GROUP BY group_id, group_name
+                             HAVING COUNT(cis) > 0";
             (filter_sql, false)
         };
         let sql = format!("{} {}", sql, order_by);
@@ -157,9 +159,9 @@ pub async fn generic_group_detail(
         let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
 
         let sql = format!(
-            "SELECT g.cis, d.name, g.type, g.sort_order, g.is_orphan
+            "SELECT g.cis, d.name, g.type, g.sort_order
              FROM generic_groups g
-             LEFT JOIN drugs d ON g.cis = d.cis
+             INNER JOIN drugs d ON g.cis = d.cis
              WHERE g.group_id = ?1
              {}",
             order_by
@@ -170,7 +172,7 @@ pub async fn generic_group_detail(
             name: row.get(1)?,
             type_: row.get(2)?,
             sort_order: row.get(3)?,
-            is_orphan: row.get::<_, i32>(4).unwrap_or(0) != 0,
+            is_orphan: false, // INNER JOIN ensures drug always exists
         }))?;
         rows.collect::<Result<Vec<_>, _>>()
     }).await.map_err(|_| GroupError::Internal("Internal server error".to_string()))?
