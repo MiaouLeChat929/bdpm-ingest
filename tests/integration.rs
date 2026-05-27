@@ -311,10 +311,10 @@ fn test_row_counts_real_db() {
         .query_row("SELECT COUNT(*) FROM drugs", [], |r| r.get(0))
         .unwrap();
 
-    // CIS_bdpm.txt expected: 15,848 rows
+    // CIS_bdpm.txt has 15,848 rows; 1,319 homeopathic drugs filtered at normalize time
     assert!(
-        (15_800..=16_000).contains(&drugs_count),
-        "drugs row count {} outside expected range 15800-16000", drugs_count
+        (14_500..=14_600).contains(&drugs_count),
+        "drugs row count {} outside expected range 14500-14600", drugs_count
     );
 
     let presentations_count: i64 = conn

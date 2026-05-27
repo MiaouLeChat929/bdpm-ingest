@@ -8,10 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests (154 tests across all modules)
+# Unit tests (154 tests across all modules — homeopathy filter, dosage parser, HTML entities, API sorting)
 cargo test --lib
 
-# Integration tests (34 tests against real DB)
+# Integration tests (34 tests against fresh DB with homeopathy excluded)
 cargo test --test integration
 
 # Server tests (19 HTTP endpoint smoke tests)
@@ -104,13 +104,14 @@ tests/     integration.rs — 34 tests (price, date, normalization, referential 
 
 **FTS5 external content** — `INSERT OR REPLACE` on the drugs table does implicit DELETE+INSERT. The `content_rowid='rowid'` mapping means FTS index entries use SQLite rowid as key. When REPLACE reassigns rowids, orphaned FTS entries can accumulate. The `rebuild_fts()` function in `fts.rs` is the safety net — call it after full imports. SQLite FTS5 external content tables do not support REPLACE conflict handling natively (converts to ABORT). Triggers fire correctly but rowid stability under REPLACE is the risk.
 
-**Homeopathic drugs** — 1,634 of 15,848 drugs (10.3%) are homeopathic. Identification signals:
-- Primary: `procedure_type LIKE 'ENREG HOM%'` (1,319 drugs, official French regulatory classification)
-- Secondary: `substance_name LIKE '%HOMEOPATHIQUE%'` in compositions (1,474 drugs)
-- Union: 1,634 unique CIS codes
-- Homeopathic drugs have NO ATC codes (no MITM entries)
-- Nature field = 'SA' (not discriminatory)
-- Elimination SQL: delete from child tables first (compositions, prescription_rules, generic_groups, mitm, smr, asmr, availability, presentations, safety_alerts), then drugs. Use `INNER JOIN` in API queries for groups and availability to prevent orphan rows.
+**Homeopathic drugs filtered at import** — Homeopathic drugs are excluded during normalization, not via post-import SQL.
+- Filter: `normalize_row()` returns `Option<NormalizedRow>` — `None` when CIS_bdpm `procedure_type` (field 5) contains "ENREG HOM" (case-insensitive)
+- Caught: 1,319 drugs (81.4% of all homeopathics) via official ANSM "Enreg homeo (Proc. Nat.)" classification
+- Remaining: ~138 drugs with homeopathic dilutions (CH/DH) in compositions but standard procedure types — accepted residual (< 1% of DB)
+- Architecture: `filter_map()` in import loop silently drops `None` rows; FK constraints in child tables naturally reject orphans
+- API queries use `INNER JOIN` (not `LEFT JOIN`) for groups and availability to prevent surfacing orphan rows
+- DB state: 14,529 drugs (from 15,848 raw), zero `ENREG HOM` entries in drugs table
+- FTS5: rebuild after import; search returns zero results for homeopathic terms (BOIRON, dilution, etc.)
 
 **CIS_CIP_Dispo_Spec** — availability/stockout file, most frequently updated file (confirmed 19/05/2026). Polled via `bdpm-ingest poll` which parses embedded dates from the BDPM HTML listing page. The server provides no ETag, no Last-Modified, no Content-Length on TXT files.
 
@@ -127,6 +128,12 @@ These will break silently if violated:
 4. **`str::replace(old, new)` — both args must be `&str`, not `char`** — `s.replace('\u{2019}', '\'')` is invalid. Use `s.replace("\u{2019}", "'")`.
 
 5. **`unwrap_or(ns())` where `ns` is a closure** — the closure return type influences `unwrap_or`'s type inference, causing type mismatch. Just use `unwrap_or("")` directly.
+
+6. **Field count parity: normalizer VALUES must match INSERT placeholders** — When adding a new file normalizer or modifying an existing one, `normalize_row()` output `.values.len()` MUST equal `insert_sql()` placeholder count AND the `stmt.execute(rusqlite::params![...])` binding count. A mismatch panics at runtime with "Wrong number of parameters passed to query".
+
+7. **`str::replace("&amp;", "&amp;")` is a no-op — check for self-replacing calls** — The Rust source file may render `&amp;`, `&lt;`, `&gt;` HTML entities as their character equivalents (`&`, `<`, `>`) in string literals, making `s.replace("&amp;", "&amp;")` compile and run as a silent no-op. When adding HTML entity decoding, verify the actual bytes with `xxd` or a hex dump, not just visual inspection. Clippy catches this with `no_effect_replace`.
+
+8. **`Option<T>` + `filter_map` for ETL filtering** — The idiomatic Rust pattern for "transform or skip" at normalize time. `normalize_row() -> Option<NormalizedRow>` returning `None` for filtered rows, consumed via `filter_map()` in the import loop. For two-pass filtering (exclude CIS from file A based on file B), use a pre-scan `HashSet<String>`, not `Arc<Mutex<HashSet>>`.
 
 6. **Field count parity: normalizer VALUES must match INSERT placeholders** — When adding a new file normalizer or modifying an existing one, `normalize_row()` output `.values.len()` MUST equal `insert_sql()` placeholder count AND the `stmt.execute(rusqlite::params![...])` binding count. A mismatch panics at runtime with "Wrong number of parameters passed to query". Always add a test case to `test_insert_sql_value_counts_match` when modifying normalizers. To debug: check normalizer values vec (does it drop any fields from raw input?) vs SQL column list vs params![] binding.
 
