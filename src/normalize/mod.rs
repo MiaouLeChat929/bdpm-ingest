@@ -52,7 +52,7 @@ fn normalize_cis_bdpm(f: &[String]) -> NormalizedRow {
             Some(strip_field(&f[6])),  // comm_status
             parse_date_ddmmYYYY(&f[7]).ok(),  // auth_date ISO
             Some(normalize_spaces(&strip_field(&f[9]))),  // lab_name (strip + normalize double-spaces)
-            Some(if f[10].trim() == "Oui" { "1" } else { "0" }.to_string()),  // is_patent
+            Some(if f[10].trim().eq_ignore_ascii_case("oui") { "1" } else { "0" }.to_string()),  // is_patent
             if f[8].is_empty() { None } else { Some(strip_field(&f[8])) },  // alert_type
             Some(strip_eu_slash(&f[11])),  // eu_number (field 11)
         ],
@@ -83,7 +83,31 @@ fn parse_dosage_mg(raw: &str) -> Option<String> {
     let normalized = trimmed.to_lowercase();
 
     // Check for non-weight units (UI, etc.) — return None
-    if normalized.contains("ui") || normalized.contains("unite") || normalized.contains("million") {
+    // Note: "unite" must match accented "unités" too
+    if normalized.contains("ui")
+        || normalized.contains("unite")
+        || normalized.contains("million")
+    {
+        return None;
+    }
+
+    // Reject homeopathic dilution patterns (CH, DH, K, X, LM)
+    // e.g., "4CH à 30CH", "5 mg (4 DH)", "30K"
+    if normalized
+        .split(|c: char| !c.is_alphabetic())
+        .any(|w| matches!(w, "ch" | "dh" | "k" | "x" | "lm"))
+    {
+        return None;
+    }
+
+    // Reject range patterns ("45 - 70 mg", "10 à 20 mg")
+    // e.g., "45 - 70 mg" would produce 4570.0 which is wrong
+    if (normalized.contains('-') || normalized.contains("à"))
+        && (normalized.contains("mg")
+            || normalized.contains('g')
+            || normalized.contains("µg")
+            || normalized.contains("mcg"))
+    {
         return None;
     }
 
@@ -833,16 +857,16 @@ mod tests {
 
     #[test]
     fn test_normalize_cis_bdpm_is_patent_uppercase() {
-        // "OUI" (uppercase) should NOT match — is_patent is case-sensitive
+        // "OUI" (uppercase) should match case-insensitively — "oui" → "1"
         let row_oui_upper = make_cis_bdpm_row([
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active", "Procédure nationale", "Commercialisée",
             "12/03/1998", "", "SANOFI",
-            "OUI",    // f[10]: uppercase — should NOT match "Oui"
+            "OUI",    // f[10]: uppercase — matches case-insensitively
             "EU/1/17/1235/",
         ]);
         let result_oui_upper = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_oui_upper);
-        assert_eq!(result_oui_upper.values[10], Some("0".to_string())); // not "1"
+        assert_eq!(result_oui_upper.values[10], Some("1".to_string())); // matches "oui" case-insensitively
 
         // "Non" (proper-case): is_patent is case-sensitive, "Non" != "Oui" → "0"
         let row_non = make_cis_bdpm_row([
