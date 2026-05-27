@@ -113,6 +113,13 @@ tests/     integration.rs — 34 tests (price, date, normalization, referential 
 - DB state: 14,529 drugs (from 15,848 raw), zero `ENREG HOM` entries in drugs table
 - FTS5: rebuild after import; search returns zero results for homeopathic terms (BOIRON, dilution, etc.)
 
+**CIS_bdpm field mapping** — The 12 tab-delimited fields are:
+  f[0]=cis, f[1]=name, f[2]=form, f[3]=route, f[4]=auth_status, f[5]=procedure_type,
+  f[6]=comm_status, f[7]=auth_date, f[8]=alert_type (85% empty),
+  f[9]=eu_number (e.g. "EU/1/01/185"), f[10]=lab_name (e.g. " BOIRON"),
+  f[11]=is_patent ("Oui"/"Non")
+  WARNING: fields 9-11 are shifted: f[9]=eu_number, f[10]=lab_name, f[11]=is_patent (not sequential).
+
 **CIS_CIP_Dispo_Spec** — availability/stockout file, most frequently updated file (confirmed 19/05/2026). Polled via `bdpm-ingest poll` which parses embedded dates from the BDPM HTML listing page. The server provides no ETag, no Last-Modified, no Content-Length on TXT files.
 
 ## rusqlite Patterns (hard-won)
