@@ -1,7 +1,23 @@
 pub mod fts;
 
+pub use fts::rebuild_fts;
+
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
+
+/// Open a database connection with PRAGMAs optimized for read-heavy API usage.
+///
+/// Sets WAL mode, busy_timeout (5s), and foreign_keys ON.
+/// Every API handler should use this instead of `Connection::open()` directly.
+pub fn open_api_conn(path: &std::path::Path) -> Result<Connection, rusqlite::Error> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL; \
+         PRAGMA busy_timeout=5000; \
+         PRAGMA foreign_keys=ON;",
+    )?;
+    Ok(conn)
+}
 
 pub fn init_db(path: &std::path::Path) -> Connection {
     let mut conn = Connection::open(path).expect("Failed to open database");

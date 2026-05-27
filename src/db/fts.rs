@@ -41,3 +41,15 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
     "#)?;
     Ok(())
 }
+
+/// Rebuild the FTS5 index from scratch.
+///
+/// Must be called after a full re-import of the drugs table, because
+/// `INSERT OR REPLACE` does not fire the `drugs_ad` DELETE trigger for
+/// the implicit delete, leaving orphaned FTS entries.
+pub fn rebuild_fts(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "INSERT INTO drugs_fts(drugs_fts) VALUES('rebuild');",
+    )?;
+    Ok(())
+}

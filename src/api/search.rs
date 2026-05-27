@@ -1,6 +1,6 @@
 use crate::api::AppState;
 use axum::{extract::{Query, State}, response::IntoResponse, Json};
-use rusqlite::{params, Connection};
+use rusqlite::params;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
@@ -53,7 +53,7 @@ pub async fn search_drugs(
     let limit = params.limit as i64;
 
     let results = tokio::task::spawn_blocking(move || -> Vec<DrugSearchResult> {
-        let conn = match Connection::open(&state.db_path) {
+        let conn = match crate::db::open_api_conn(&state.db_path) {
             Ok(c) => c,
             Err(_) => return vec![],
         };
@@ -77,7 +77,10 @@ pub async fn search_drugs(
         query_result
     })
     .await
-    .unwrap_or_default();
+    .unwrap_or_else(|e| {
+        tracing::error!("Search task failed: {e}");
+        vec![]
+    });
 
     Json(results)
 }

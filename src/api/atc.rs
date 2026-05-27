@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -50,7 +50,7 @@ pub async fn atc_top_level(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AtcCode>>, AtcError> {
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<AtcCode>, rusqlite::Error> {
-        let conn = Connection::open(&state.db_path)?;
+        let conn = crate::db::open_api_conn(&state.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT atc_code, parent_1_char FROM atc_codes WHERE LENGTH(atc_code) = 1 ORDER BY atc_code"
         )?;
@@ -59,8 +59,8 @@ pub async fn atc_top_level(
             parent_1_char: row.get(1)?,
         }))?;
         rows.collect::<Result<Vec<_>, _>>()
-    }).await.map_err(|e| AtcError::Internal(e.to_string()))?
-      .map_err(|e| AtcError::Internal(e.to_string()))?;
+    }).await.map_err(|_| AtcError::Internal("Internal server error".to_string()))?
+      .map_err(|_| AtcError::Internal("Internal server error".to_string()))?;
     Ok(Json(rows))
 }
 
@@ -81,7 +81,7 @@ pub async fn atc_detail(
     State(state): State<AppState>,
 ) -> Result<Json<AtcDetail>, AtcError> {
     let detail = tokio::task::spawn_blocking(move || -> Result<AtcDetail, rusqlite::Error> {
-        let conn = Connection::open(&state.db_path)?;
+        let conn = crate::db::open_api_conn(&state.db_path)?;
 
         // Get ATC info (use code if not found in DB)
         let (atc_code, parent) = conn.query_row(
@@ -114,7 +114,7 @@ pub async fn atc_detail(
         ).unwrap_or(0);
 
         Ok(AtcDetail { atc_code, parent_1_char: parent, children, drugs_count })
-    }).await.map_err(|e| AtcError::Internal(e.to_string()))?
-      .map_err(|e| AtcError::Internal(e.to_string()))?;
+    }).await.map_err(|_| AtcError::Internal("Internal server error".to_string()))?
+      .map_err(|_| AtcError::Internal("Internal server error".to_string()))?;
     Ok(Json(detail))
 }

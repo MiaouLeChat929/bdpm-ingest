@@ -5,7 +5,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 
-use crate::db::{optimize_for_bulk_insert, restore_normal_settings};
+use crate::db::{optimize_for_bulk_insert, rebuild_fts, restore_normal_settings};
 use crate::download::manifest::BDPMFile;
 use crate::download::state::StateStore;
 use crate::download::Fetcher;
@@ -291,6 +291,13 @@ fn import_file(
 
         drop(stmt);
         tx.commit()?;
+
+        // Post-import: rebuild FTS5 index after drugs table changes
+        // INSERT OR REPLACE doesn't fire the drugs_ad DELETE trigger for the
+        // implicit delete, leaving orphaned FTS entries. Rebuild fixes this.
+        if file == BDPMFile::CIS_bdpm {
+            rebuild_fts(conn).ok();
+        }
 
         // Post-import: flag orphan rows (withdrawn drugs not in drugs table)
         // BRIEF.md: 2,806 SMR / 1,567 ASMR / 2,503 GENER orphan rows expected

@@ -5,7 +5,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rusqlite::Connection;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -53,7 +52,7 @@ pub async fn list_generic_groups(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<GenericGroupList>>, GroupError> {
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<GenericGroupList>, rusqlite::Error> {
-        let conn = Connection::open(&state.db_path)?;
+        let conn = crate::db::open_api_conn(&state.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT group_id, group_name, COUNT(cis) as cis_count
              FROM generic_groups
@@ -66,8 +65,8 @@ pub async fn list_generic_groups(
             cis_count: row.get(2)?,
         }))?;
         rows.collect::<Result<Vec<_>, _>>()
-    }).await.map_err(|e| GroupError::Internal(e.to_string()))?
-      .map_err(|e| GroupError::Internal(e.to_string()))?;
+    }).await.map_err(|_| GroupError::Internal("Internal server error".to_string()))?
+      .map_err(|_| GroupError::Internal("Internal server error".to_string()))?;
     Ok(Json(rows))
 }
 
@@ -88,7 +87,7 @@ pub async fn generic_group_detail(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<GenericGroupMember>>, GroupError> {
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<GenericGroupMember>, rusqlite::Error> {
-        let conn = Connection::open(&state.db_path)?;
+        let conn = crate::db::open_api_conn(&state.db_path)?;
         let mut stmt = conn.prepare(
             "SELECT g.cis, d.name, g.type, g.sort_order, g.is_orphan
              FROM generic_groups g
@@ -104,7 +103,7 @@ pub async fn generic_group_detail(
             is_orphan: row.get::<_, i32>(4).unwrap_or(0) != 0,
         }))?;
         rows.collect::<Result<Vec<_>, _>>()
-    }).await.map_err(|e| GroupError::Internal(e.to_string()))?
-      .map_err(|e| GroupError::Internal(e.to_string()))?;
+    }).await.map_err(|_| GroupError::Internal("Internal server error".to_string()))?
+      .map_err(|_| GroupError::Internal("Internal server error".to_string()))?;
     Ok(Json(rows))
 }

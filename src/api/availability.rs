@@ -5,11 +5,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rusqlite::Connection;
-use serde::Deserialize;
-use serde::Serialize;
-use utoipa::IntoParams;
-use utoipa::ToSchema;
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Deserialize, IntoParams)]
 pub struct AvailParams {
@@ -64,7 +61,7 @@ pub async fn availability(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AvailabilityRow>>, AvailabilityError> {
     let rows = tokio::task::spawn_blocking(move || -> Result<Vec<AvailabilityRow>, rusqlite::Error> {
-        let conn = Connection::open(&state.db_path)?;
+        let conn = crate::db::open_api_conn(&state.db_path)?;
 
         let query_str: &str;
         let has_cis = params.cis.is_some();
@@ -123,7 +120,7 @@ pub async fn availability(
             rows.collect::<Result<Vec<_>, _>>()?
         };
         Ok(rows)
-    }).await.map_err(|e| AvailabilityError::Internal(e.to_string()))?
-      .map_err(|e| AvailabilityError::Internal(e.to_string()))?;
+    }).await.map_err(|_| AvailabilityError::Internal("Internal server error".to_string()))?
+      .map_err(|_| AvailabilityError::Internal("Internal server error".to_string()))?;
     Ok(Json(rows))
 }

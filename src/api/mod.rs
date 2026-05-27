@@ -61,7 +61,7 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
     let db_path = state.db_path.clone();
 
     let result = spawn_blocking(move || {
-        let conn = rusqlite::Connection::open(&db_path)?;
+        let conn = crate::db::open_api_conn(&db_path)?;
 
         let last_import = conn
             .query_row(

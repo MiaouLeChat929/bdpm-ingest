@@ -4,7 +4,6 @@
 //! CIS_InfoImportantes.txt import). Falls back to stub when no data.
 
 use axum::{extract::{Path, State}, http::StatusCode, Json};
-use rusqlite::Connection;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -49,11 +48,10 @@ pub async fn drug_safety(
     Path(cis): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<SafetyResponse>, StatusCode> {
-    let db_path = state.db_path.clone();
     let cis_owned = cis.clone();
 
     let alerts = tokio::task::spawn_blocking(move || -> Option<Vec<SafetyAlert>> {
-        let conn = Connection::open(&db_path).ok()?;
+        let conn = crate::db::open_api_conn(&state.db_path).ok()?;
 
         // Verify CIS exists
         let cis_exists: bool = conn.query_row(

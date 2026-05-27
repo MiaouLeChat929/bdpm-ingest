@@ -5,7 +5,6 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rusqlite::Connection;
 use serde::Serialize;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -78,8 +77,8 @@ pub async fn drug_detail(
     let cis = cis.trim().to_string();
 
     let detail = tokio::task::spawn_blocking(move || {
-        let conn = Connection::open(&state.db_path)
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        let conn = crate::db::open_api_conn(&state.db_path)
+            .map_err(|_| ApiError::Internal("Internal server error".to_string()))?;
 
         // Drug row
         let drug = conn.query_row(
@@ -103,7 +102,7 @@ pub async fn drug_detail(
             }),
         ).map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => ApiError::NotFound(format!("CIS {cis} not found")),
-            _ => ApiError::Internal(e.to_string()),
+            _ => ApiError::Internal("Internal server error".to_string()),
         })?;
 
         // Presentations
@@ -111,7 +110,7 @@ pub async fn drug_detail(
             "SELECT cip, cip_raw, labels, pres_status, prix_ville_cents,
                     prix_rate_cents, ean13, reimbursable, reimb_rate
              FROM presentations WHERE cis = ?1"
-        ).map_err(|e| ApiError::Internal(e.to_string()))?;
+        ).map_err(|_| ApiError::Internal("Internal server error".to_string()))?;
         let presentations = stmt.query_map([&cis], |row| Ok(Presentation {
             cip: row.get(0)?,
             cip_raw: row.get(1)?,
@@ -122,22 +121,22 @@ pub async fn drug_detail(
             ean13: row.get(6)?,
             reimbursable: row.get(7)?,
             reimb_rate: row.get(8)?,
-        })).map_err(|e| ApiError::Internal(e.to_string()))?
+        })).map_err(|_| ApiError::Internal("Internal server error".to_string()))?
           .filter_map(|r| r.ok()).collect();
 
         // Compositions
         let mut stmt = conn.prepare(
             "SELECT substance_name, dosage, pharm_code FROM compositions WHERE cis = ?1"
-        ).map_err(|e| ApiError::Internal(e.to_string()))?;
+        ).map_err(|_| ApiError::Internal("Internal server error".to_string()))?;
         let compositions = stmt.query_map([&cis], |row| Ok(Composition {
             substance_name: row.get(0)?,
             dosage: row.get(1)?,
             pharm_code: row.get::<_, String>(2).unwrap_or_default(),
-        })).map_err(|e| ApiError::Internal(e.to_string()))?
+        })).map_err(|_| ApiError::Internal("Internal server error".to_string()))?
           .filter_map(|r| r.ok()).collect();
 
         Ok(DrugDetail { presentations, compositions, ..drug })
-    }).await.map_err(|e| ApiError::Internal(e.to_string()))??;
+    }).await.map_err(|_| ApiError::Internal("Internal server error".to_string()))??;
 
     Ok(Json(detail))
 }
