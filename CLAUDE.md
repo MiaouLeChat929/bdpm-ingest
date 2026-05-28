@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests (154 tests across all modules — homeopathy filter, dosage parser, HTML entities, API sorting)
+# Unit tests (155 tests across all modules — homeopathy filter, dosage parser, HTML entities, API sorting, FTS5 sanitization)
 cargo test --lib
 
 # Integration tests (37 tests — normalization, row counts, referential integrity, FTS5 search)
@@ -38,6 +38,7 @@ Single test: `cargo test test_name_here --lib`
 ./target/release/bdpm-ingest import [--full] [--file Foo.txt]   # fetch + parse + normalize + import
 ./target/release/bdpm-ingest sync                                # dry-run: detect changed files, print plan
 ./target/release/bdpm-ingest dispo                               # sync only CIS_CIP_Dispo_Spec.txt
+./target/release/bdpm-ingest fts-rebuild                          # rebuild FTS5 full-text search index
 ./target/release/bdpm-ingest check                               # BLAKE3 hash all files, report changes
 ./target/release/bdpm-ingest fetch                               # download all files, print hashes
 ./target/release/bdpm-ingest poll                                # HTML listing page date parse, detect changes

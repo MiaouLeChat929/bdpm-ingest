@@ -19,6 +19,33 @@ fn default_limit() -> usize {
     20
 }
 
+/// Sanitizes user input for FTS5 query building.
+/// FTS5 interprets special characters as operators: - + " * ( ) : ^ | ~
+/// Stripping them prevents query errors and unexpected behavior.
+fn sanitize_fts_query(input: &str) -> String {
+    input
+        .chars()
+        .filter(|c| !matches!(c, '-' | '+' | '"' | '*' | '(' | ')' | ':' | '^' | '|' | '~'))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_strips_fts_operators() {
+        assert_eq!(sanitize_fts_query("-DOLIPRANE"), "DOLIPRANE");
+        assert_eq!(sanitize_fts_query("test+more"), "testmore");
+        assert_eq!(sanitize_fts_query("a\"b"), "ab");
+        assert_eq!(sanitize_fts_query("a(b)c"), "abc");
+        assert_eq!(sanitize_fts_query("col:value"), "colvalue");
+        assert_eq!(sanitize_fts_query("normal search"), "normal search");
+        assert_eq!(sanitize_fts_query("DOLIPRANE"), "DOLIPRANE");
+        assert_eq!(sanitize_fts_query("CAFÉ"), "CAFÉ");
+        assert_eq!(sanitize_fts_query(""), "");
+    }
+}
 #[derive(serde::Serialize, utoipa::ToSchema, Clone)]
 pub struct DrugSearchResult {
     pub cis: String,
@@ -55,7 +82,9 @@ pub async fn search_drugs(
     }
 
     // Build FTS5 prefix query for partial matching
-    let fts_query = format!("{}*", q);
+    // Sanitize user input to prevent FTS5 operator injection
+    let sanitized = sanitize_fts_query(q);
+    let fts_query = format!("{}*", sanitized);
     let limit = params.limit as i64;
 
     let results = tokio::task::spawn_blocking(move || -> Vec<DrugSearchResult> {

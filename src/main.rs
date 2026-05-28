@@ -76,6 +76,11 @@ enum Command {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
     },
+    /// Rebuild the FTS5 full-text search index from scratch.
+    FtsRebuild {
+        #[arg(long, default_value = "data/bdpm.db")]
+        db_path: PathBuf,
+    },
     /// Start the HTTP API server for drug search.
     Serve {
         #[arg(long, default_value = "127.0.0.1:8080")]
@@ -286,6 +291,17 @@ fn main() -> Result<()> {
             report.print();
 
             state.save(&state_path(&data_dir))?;
+        }
+
+        Command::FtsRebuild { db_path } => {
+            if !db_path.exists() {
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
+            }
+            let conn = rusqlite::Connection::open(&db_path)?;
+            println!("Rebuilding FTS5 index...");
+            crate::db::rebuild_fts(&conn)?;
+            let count: i64 = conn.query_row("SELECT COUNT(*) FROM drugs_fts", [], |r| r.get(0))?;
+            println!("FTS5 index rebuilt: {} entries.", count);
         }
     }
 
