@@ -8,13 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Release build (LTO + opt-level 3 configured)
 cargo build --release
 
-# Unit tests (155 tests across all modules — homeopathy filter, dosage parser, HTML entities, API sorting, FTS5 sanitization)
+# Unit tests (homeopathy filter, dosage parser, HTML entities, API sorting, FTS5 sanitization)
 cargo test --lib
 
-# Integration tests (37 tests — normalization, row counts, referential integrity, FTS5 search)
+# Integration tests (normalization, row counts, referential integrity, FTS5 search)
 cargo test --test integration
 
-# Server tests (21 HTTP endpoint smoke tests — search, drug detail, ATC, MITM)
+# Server tests (HTTP endpoint smoke tests — search, drug detail, ATC, MITM)
 cargo test --test server_integration
 
 # All tests
@@ -53,42 +53,12 @@ Single test: `cargo test test_name_here --lib`
 ```
 Pipeline: fetch → parse → normalize → dedup → import
 
-download/   manifest.rs  — BDPMFile enum (10 files), Encoding, FileSchema, download_path(), target_table()
-             state.rs    — StateStore (BLAKE3 hash + size per file), JSON persisted
-             listing.rs  — HTML listing page date parser (polling without downloading)
-             fetcher.rs  — ureq HTTP client, 3-retry backoff, fetch_text() for HTML
-
-parse/      tab.rs      — TabParser streaming iterator, Windows-1252/UTF-8/Latin-1 via encoding_rs, multiline record handling (SMR/ASMR avis field). Strips UTF-8 BOM before encoding detection.
-             mod.rs     — parse_file(path, BDPMFile) → Vec<NormalizedRow>
-
-normalize/  mod.rs     — normalize_row dispatcher per BDPMFile. CIS_MITM drops drug_name (not stored in DB).
-             price.rs   — parse_price_cents (handles "1,466,29" → 146629, 2 commas)
-             date.rs    — parse_date_ddmmYYYY, parse_date_YYYYMMDD (range 1900–2100)
-             fields.rs  — strip_field, normalize_spaces, normalize_generic_type ("0"→"reference"…)
-             html.rs    — strip_avis_html (HTML → plain text), decode_html_entities (named + numeric entities), normalize_newlines
-             dedup.rs   — dedup_compo: key=(cis, substance_code, dosage), 4,780 duplicates removed
-
-import/     mod.rs     — run_import orchestrator, insert_sql per table, ImportReport
-
-cache/     mod.rs     — TtlCache<K, V>, 6-hour default, Mutex<HashMap>
-
-sync/       mod.rs     — SyncPlan, ChangeReason, detect_changes() [dry-run], run_sync(), run_dispo_sync()
-                         All delegate to run_import() — no logic duplication.
-
-db/        mod.rs     — init_db (WAL + FK_ON + migrations), optimize_for_bulk_insert, restore_normal_settings
-             fts.rs     — FTS5 virtual table + sync triggers
-             migrations/001_initial.sql — all 11 tables + CHECK constraints
-
-api/       mod.rs     — AppState, run_server (axum), all routes wired, health endpoint (JSON: status/last_import/drug_count)
-             search.rs  — GET /drugs FTS5 search endpoint
-             drugs.rs   — GET /drugs/:cis with presentations + compositions
-             safety.rs  — GET /drugs/:cis/safety stub endpoint
-             groups.rs  — GET /generic-groups, /generic-groups/:id
-             atc.rs     — GET /atc, /atc/:code (LIKE prefix for hierarchy)
-             availability.rs — GET /availability?cis=&cip=
-             openapi.rs — utoipa OpenApi struct, /openapi.json + /openapi.yaml endpoints
-
-tests/     integration.rs — 34 tests (price, date, normalization, referential integrity, row counts, orphan FKs)
+Key types: BDPMFile (central routing enum, 10 files), NormalizedRow (table + values)
+Key modules: download/ (fetch + state + listing), parse/ (TabParser, encoding detection),
+             normalize/ (row transformers, dedup, price/date/HTML fields),
+             import/ (orchestrator, bulk insert), db/ (SQLite + FTS5 + migrations),
+             api/ (axum HTTP server, search, drugs, ATC, availability),
+             cache/ (TTL cache), sync/ (change detection + sync plans)
 ```
 
 ## Key Design Decisions
@@ -145,20 +115,3 @@ These will break silently if violated:
 
 9. **FTS5 column names must be independent of source table** — With `content=''`, FTS5 column names are arbitrary (no mapping to source table). With `content='table'`, FTS5 column names MUST match source table column names exactly or all queries fail with "no such column: T.X". Triggers insert by position, not name, so trigger column lists can use `new.any_column_name` regardless of FTS column names.
 
-## Rust Compilation Shortcuts (from global CLAUDE.md)
-
-Fix Rust compilation errors at the tool level without re-running cargo:
-
-- **Quick error scan**: `cargo check 2>&1 | grep -E "^error"` — no context overhead
-- **Missing trait impl**: grep for the actual trait in `~/.cargo/registry/src/`, find the concrete impl
-- **Byte-level corruption** in source (e.g. `\x5c` literal bytes): Python binary replace:
-  ```python
-  data = open('src/file.rs', 'rb').read()
-  data = data.replace(b'\x5c&', b'&')  # fix literal backslash+ampersand in tokens
-  open('src/file.rs', 'wb').write(data)
-  ```
-  The Edit tool's escaping layer can produce literal `\x5c` bytes in `&`-prefixed Rust expressions. Byte-level fix is the only solution.
-- **`?` on wrong type**: check if the return type changed (e.g. `init_db` returning `Connection` vs `Result<Connection>`)
-- **`std::io::Read` not imported**: `use std::io::Read`
-- **`IntoRustString` for Response`**: ureq 2.x → `into_reader()` + `read_to_end()`
-- **`unwrap_or(ns())`** where `ns()` is a closure returning `&str`: the closure return type influences `unwrap_or`, causing type mismatch → just use `unwrap_or("")`

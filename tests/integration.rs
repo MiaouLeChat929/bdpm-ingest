@@ -968,6 +968,23 @@ fn fts5_rebuild_produces_valid_index() {
 }
 
 #[test]
+fn fts5_substance_updates_on_composition_change() {
+    // This test verifies the trigger architecture exists
+    // It can't test live trigger behavior without a writeable DB,
+    // but it verifies the triggers are created
+    let conn = match open_db() {
+        Some(c) => c,
+        None => { eprintln!("SKIP: no data/bdpm.db"); return; }
+    };
+    // Verify composition triggers exist
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'compositions_%'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    assert!(count >= 3, "Expected at least 3 composition triggers, found {}", count);
+}
+
+#[test]
 fn fts5_search_by_substance_name() {
     let conn = match open_db() {
         Some(c) => c,

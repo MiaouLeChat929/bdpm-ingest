@@ -41,6 +41,31 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
             VALUES (new.cis, new.name_raw, new.name, new.atc_code, new.form, new.lab_name,
                     COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = new.cis), ''));
         END;
+
+        -- Composition triggers: update FTS5 substance_name when compositions change
+        CREATE TRIGGER IF NOT EXISTS compositions_ai AFTER INSERT ON compositions BEGIN
+            DELETE FROM drugs_fts WHERE cis = new.cis;
+            INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+            SELECT d.cis, d.name_raw, d.name, d.atc_code, d.form, d.lab_name,
+                   COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = new.cis), '')
+            FROM drugs d WHERE d.cis = new.cis;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS compositions_ad AFTER DELETE ON compositions BEGIN
+            DELETE FROM drugs_fts WHERE cis = old.cis;
+            INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+            SELECT d.cis, d.name_raw, d.name, d.atc_code, d.form, d.lab_name,
+                   COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = old.cis), '')
+            FROM drugs d WHERE d.cis = old.cis;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS compositions_au AFTER UPDATE ON compositions BEGIN
+            DELETE FROM drugs_fts WHERE cis = new.cis;
+            INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+            SELECT d.cis, d.name_raw, d.name, d.atc_code, d.form, d.lab_name,
+                   COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = new.cis), '')
+            FROM drugs d WHERE d.cis = new.cis;
+        END;
     "#)?;
     Ok(())
 }

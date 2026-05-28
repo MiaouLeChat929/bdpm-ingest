@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::Json, Router, routing::get};
+use axum::{extract::State, http::StatusCode, middleware::from_fn, response::Json, Router, routing::get};
 use serde::Serialize;
 use std::path::PathBuf;
 use tokio::task::spawn_blocking;
@@ -8,6 +8,7 @@ pub mod availability;
 pub mod drugs;
 pub mod groups;
 pub mod openapi;
+pub mod rate_limit;
 pub mod safety;
 pub mod search;
 
@@ -38,6 +39,7 @@ pub fn build_app(db_path: PathBuf) -> Router {
         .route("/atc/{code}", get(atc::atc_detail))
         .route("/availability", get(availability::availability))
         .with_state(state)
+        .layer(from_fn(rate_limit::rate_limit_filter))
 }
 
 /// Whitelist-based sort helper — safely builds ORDER BY clause from user input
