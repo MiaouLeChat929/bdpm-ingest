@@ -11,10 +11,10 @@ cargo build --release
 # Unit tests (154 tests across all modules — homeopathy filter, dosage parser, HTML entities, API sorting)
 cargo test --lib
 
-# Integration tests (34 tests against fresh DB with homeopathy excluded)
+# Integration tests (37 tests — normalization, row counts, referential integrity, FTS5 search)
 cargo test --test integration
 
-# Server tests (19 HTTP endpoint smoke tests)
+# Server tests (21 HTTP endpoint smoke tests — search, drug detail, ATC, MITM)
 cargo test --test server_integration
 
 # All tests
@@ -102,7 +102,7 @@ tests/     integration.rs — 34 tests (price, date, normalization, referential 
 
 **Orphan FKs** — SMR/ASMR/GENER/safety_alerts reference withdrawn drugs. The `is_orphan` flag is set post-import via UPDATE. `INSERT OR REPLACE` for drugs preserves references.
 
-**FTS5 external content** — `INSERT OR REPLACE` on the drugs table does implicit DELETE+INSERT. The `content_rowid='rowid'` mapping means FTS index entries use SQLite rowid as key. When REPLACE reassigns rowids, orphaned FTS entries can accumulate. The `rebuild_fts()` function in `fts.rs` is the safety net — call it after full imports. SQLite FTS5 external content tables do not support REPLACE conflict handling natively (converts to ABORT). Triggers fire correctly but rowid stability under REPLACE is the risk.
+**FTS5 standalone (no external content)** — FTS5 uses a standalone table (no `content='drugs'`). Triggers (`drugs_ai`, `drugs_ad`, `drugs_au`) handle all sync. Previous external-content approach broke because FTS5 column names (`name_clean`, `substance_name_clean`) didn't match `drugs` table columns. `rebuild_fts()` does DELETE+re-INSERT (not the `'rebuild'` command which requires content sync). FTS columns: `cis`, `name_raw`, `name`, `atc_code`, `form`, `lab_name`.
 
 **Homeopathic drugs filtered at import** — Homeopathic drugs are excluded during normalization, not via post-import SQL.
 - Filter: `normalize_row()` returns `Option<NormalizedRow>` — `None` when CIS_bdpm `procedure_type` (field 5) contains "ENREG HOM" (case-insensitive)
@@ -136,15 +136,13 @@ These will break silently if violated:
 
 5. **`unwrap_or(ns())` where `ns` is a closure** — the closure return type influences `unwrap_or`'s type inference, causing type mismatch. Just use `unwrap_or("")` directly.
 
-6. **Field count parity: normalizer VALUES must match INSERT placeholders** — When adding a new file normalizer or modifying an existing one, `normalize_row()` output `.values.len()` MUST equal `insert_sql()` placeholder count AND the `stmt.execute(rusqlite::params![...])` binding count. A mismatch panics at runtime with "Wrong number of parameters passed to query".
+6. **Field count parity: normalizer VALUES must match INSERT placeholders** — When adding a new file normalizer or modifying an existing one, `normalize_row()` output `.values.len()` MUST equal `insert_sql()` placeholder count AND the `stmt.execute(rusqlite::params![...])` binding count. A mismatch panics at runtime. Always add a test case to `test_insert_sql_value_counts_match`. Debug: check normalizer values vec (does it drop any fields from raw input?) vs SQL column list vs params![] binding.
 
 7. **`str::replace("&amp;", "&amp;")` is a no-op — check for self-replacing calls** — The Rust source file may render `&amp;`, `&lt;`, `&gt;` HTML entities as their character equivalents (`&`, `<`, `>`) in string literals, making `s.replace("&amp;", "&amp;")` compile and run as a silent no-op. When adding HTML entity decoding, verify the actual bytes with `xxd` or a hex dump, not just visual inspection. Clippy catches this with `no_effect_replace`.
 
 8. **`Option<T>` + `filter_map` for ETL filtering** — The idiomatic Rust pattern for "transform or skip" at normalize time. `normalize_row() -> Option<NormalizedRow>` returning `None` for filtered rows, consumed via `filter_map()` in the import loop. For two-pass filtering (exclude CIS from file A based on file B), use a pre-scan `HashSet<String>`, not `Arc<Mutex<HashSet>>`.
 
-6. **Field count parity: normalizer VALUES must match INSERT placeholders** — When adding a new file normalizer or modifying an existing one, `normalize_row()` output `.values.len()` MUST equal `insert_sql()` placeholder count AND the `stmt.execute(rusqlite::params![...])` binding count. A mismatch panics at runtime with "Wrong number of parameters passed to query". Always add a test case to `test_insert_sql_value_counts_match` when modifying normalizers. To debug: check normalizer values vec (does it drop any fields from raw input?) vs SQL column list vs params![] binding.
-
-7. **`str::replace("&amp;", "&amp;")` is a no-op — check for self-replacing calls** — The Rust source file may render `&amp;`, `&lt;`, `&gt;` HTML entities as their character equivalents (`&`, `<`, `>`) in string literals, making `s.replace("&amp;", "&amp;")` compile and run as a silent no-op. When adding HTML entity decoding, verify the actual bytes with `xxd` or a hex dump, not just visual inspection. Clippy catches this with `no_effect_replace`.
+9. **FTS5 column names must be independent of source table** — With `content=''`, FTS5 column names are arbitrary (no mapping to source table). With `content='table'`, FTS5 column names MUST match source table column names exactly or all queries fail with "no such column: T.X". Triggers insert by position, not name, so trigger column lists can use `new.any_column_name` regardless of FTS column names.
 
 ## Rust Compilation Shortcuts (from global CLAUDE.md)
 

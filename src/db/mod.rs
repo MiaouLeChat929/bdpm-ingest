@@ -32,6 +32,7 @@ pub fn init_db(path: &std::path::Path) -> Connection {
         M::up(include_str!("migrations/004_populate_atc_codes.sql")),
         M::up(include_str!("migrations/005_safety_alerts.sql")),
         M::up(include_str!("migrations/006_clean_data.sql")),
+        M::up(include_str!("migrations/007_fix_fts5_schema.sql")),
     ]);
     migrations.to_latest(&mut conn).expect("Migration failed");
 

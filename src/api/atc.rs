@@ -110,7 +110,8 @@ pub async fn atc_detail(
             3 => 4,
             4 => 5,
             5 => 7,
-            _ => return Ok(AtcDetail { atc_code, parent_1_char: parent, children: vec![], drugs_count: 0 }),
+            // For 7-char codes (leaf nodes), no children
+            _ => 0,
         };
         let prefix = format!("{}%", atc_code);
 
@@ -120,19 +121,24 @@ pub async fn atc_detail(
         ];
         let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
 
-        let children_sql = format!(
-            "SELECT a.atc_code FROM atc_codes a \
-             LEFT JOIN (SELECT atc_code, COUNT(DISTINCT cis) as drugs_count \
-                        FROM mitm WHERE atc_code LIKE ?1 GROUP BY atc_code) m \
-             ON a.atc_code = m.atc_code \
-             WHERE a.atc_code LIKE ?1 AND LENGTH(a.atc_code) = ?2 \
-             {}",
-            order_by
-        );
-        let mut stmt = conn.prepare(&children_sql)?;
-        let children = stmt.query_map(params![&prefix, child_len], |row| {
-            row.get::<_, String>(0)
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let children: Vec<String> = if child_len > 0 {
+            let children_sql = format!(
+                "SELECT a.atc_code FROM atc_codes a \
+                 LEFT JOIN (SELECT atc_code, COUNT(DISTINCT cis) as drugs_count \
+                            FROM mitm WHERE atc_code LIKE ?1 GROUP BY atc_code) m \
+                 ON a.atc_code = m.atc_code \
+                 WHERE a.atc_code LIKE ?1 AND LENGTH(a.atc_code) = ?2 \
+                 {}",
+                order_by
+            );
+            let mut stmt = conn.prepare(&children_sql)?;
+            let mapped = stmt.query_map(params![&prefix, child_len], |row| {
+                row.get::<_, String>(0)
+            })?;
+            mapped.collect::<Result<Vec<_>, _>>()?
+        } else {
+            vec![]
+        };
 
         // Drug count under this ATC (via mitm join)
         let drugs_count: i64 = conn.query_row(

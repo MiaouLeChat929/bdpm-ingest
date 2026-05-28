@@ -35,17 +35,20 @@ fn create_test_db() -> PathBuf {
     let schema_005 = include_str!("../src/db/migrations/005_safety_alerts.sql");
     conn.execute_batch(schema_005).expect("Failed to apply migration 005");
 
-    // Create FTS5 virtual table for search
+    // Create FTS5 virtual table for search (standalone, no content=)
     conn.execute_batch(r#"
         CREATE VIRTUAL TABLE IF NOT EXISTS drugs_fts USING fts5(
             cis,
+            name_raw,
             name,
+            atc_code,
             form,
-            lab_name,
-            content='drugs',
-            content_rowid='rowid'
+            lab_name
         );
     "#).expect("Failed to create FTS table");
+
+    // Populate FTS from drugs (must come after drug INSERTs)
+    // Done after all test data is inserted below
 
     // Insert test data
     conn.execute(
@@ -197,9 +200,11 @@ fn create_test_db() -> PathBuf {
         rusqlite::params!["test", "abc123", 100, 2, "success", 0, 0, 100]
     ).expect("Failed to insert import log");
 
-    // Rebuild FTS table after inserting data
-    conn.execute("INSERT INTO drugs_fts(drugs_fts) VALUES('rebuild')", [])
-        .expect("Failed to rebuild FTS table");
+    // Populate FTS from drugs
+    conn.execute_batch(
+        "INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
+         SELECT cis, name, name, atc_code, form, lab_name FROM drugs;"
+    ).expect("Failed to populate FTS table");
 
     conn.close().expect("Failed to close test DB connection");
     db_path
@@ -357,6 +362,23 @@ mod integration {
         // No safety_alerts data in test DB, so data_available should be false
         assert_eq!(body["data_available"], false, "No safety alerts in test data");
         assert!(body["alerts"].is_array(), "Should have alerts array");
+
+        server.abort();
+        cleanup_db(&db_path);
+    }
+
+    #[tokio::test]
+    async fn test_drug_detail_returns_atc_code() {
+        let db_path = create_test_db();
+        let (server, base_url) = run_test_server(db_path.clone()).await;
+
+        let url = format!("{}/drugs/60004971", base_url);
+        let resp = reqwest::get(&url).await.expect("Drug detail request failed");
+
+        assert_eq!(resp.status(), 200, "Drug detail should return 200");
+
+        let body: serde_json::Value = resp.json().await.expect("Failed to parse drug detail");
+        assert_eq!(body["atc_code"], "N02BE01", "Should return correct ATC code");
 
         server.abort();
         cleanup_db(&db_path);
@@ -570,6 +592,24 @@ mod integration {
         let body: Vec<serde_json::Value> = resp.json().await.expect("Failed to parse response");
         assert!(!body.is_empty(), "Should have availability data for CIS 60004971");
         assert_eq!(body[0]["cis"], "60004971");
+
+        server.abort();
+        cleanup_db(&db_path);
+    }
+
+    #[tokio::test]
+    async fn test_atc_detail_with_drugs() {
+        let db_path = create_test_db();
+        let (server, base_url) = run_test_server(db_path.clone()).await;
+
+        let url = format!("{}/atc/N02BE01", base_url);
+        let resp = reqwest::get(&url).await.expect("ATC detail request failed");
+
+        assert_eq!(resp.status(), 200, "ATC detail should return 200");
+
+        let body: serde_json::Value = resp.json().await.expect("Failed to parse ATC detail");
+        assert_eq!(body["atc_code"], "N02BE01", "Should return correct ATC code");
+        assert!(body["drugs_count"].as_i64().unwrap_or(0) >= 1, "Should have at least one drug with this ATC code");
 
         server.abort();
         cleanup_db(&db_path);

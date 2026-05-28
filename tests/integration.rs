@@ -321,10 +321,10 @@ fn test_row_counts_real_db() {
         .query_row("SELECT COUNT(*) FROM presentations", [], |r| r.get(0))
         .unwrap();
 
-    // CIS_CIP_bdpm.txt expected: 20,903 rows
+    // CIS_CIP_bdpm.txt: 20,796 presentations after filtering homeopathic drugs
     assert!(
-        (20_800..=21_000).contains(&presentations_count),
-        "presentations row count {} outside expected range 20800-21000", presentations_count
+        (20_700..=21_000).contains(&presentations_count),
+        "presentations row count {} outside expected range 20700-21000", presentations_count
     );
 }
 
@@ -810,4 +810,72 @@ fn asmr_orphan_flag_exists() {
         )
         .unwrap_or(0);
     assert_eq!(count, 1, "asmr table should have is_orphan column");
+}
+
+// =============================================================================
+// FTS5 SEARCH (Full-Text Search Index)
+// =============================================================================
+
+#[test]
+fn fts5_search_returns_results() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: data/bdpm.db not found");
+            return;
+        }
+    };
+
+    let search_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM drugs_fts WHERE drugs_fts MATCH 'DOLIPRANE'",
+        [],
+        |r| r.get(0),
+    ).expect("FTS5 query failed — index may be broken");
+
+    assert!(search_count > 0, "FTS5 MATCH for 'DOLIPRANE' returned no results");
+}
+
+#[test]
+fn fts5_search_excludes_homeopathy() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: data/bdpm.db not found");
+            return;
+        }
+    };
+
+    let homeopathy_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM drugs_fts WHERE drugs_fts MATCH 'ENREG*HOM'",
+        [],
+        |r| r.get(0),
+    ).expect("FTS5 query failed");
+
+    assert_eq!(homeopathy_count, 0, "FTS5 should not contain ENREG HOM (homeopathics filtered)");
+}
+
+#[test]
+fn fts5_rebuild_produces_valid_index() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: data/bdpm.db not found");
+            return;
+        }
+    };
+
+    let fts_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM drugs_fts",
+        [],
+        |r| r.get(0),
+    ).expect("FTS5 COUNT query failed");
+
+    let drugs_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM drugs",
+        [],
+        |r| r.get(0),
+    ).expect("Failed to count drugs");
+
+    assert!(fts_count > 0, "FTS5 index should have rows");
+    assert_eq!(fts_count, drugs_count, "FTS5 row count should match drugs row count");
 }

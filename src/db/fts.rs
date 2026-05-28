@@ -2,44 +2,39 @@ use rusqlite::Connection;
 
 /// Create FTS5 virtual table for drug full-text search.
 ///
-/// Uses external content FTS5 (`content='drugs'`) so the FTS table
-/// references the actual drugs table without shadowing it.
-///
-/// Triggers keep drugs_fts in sync with INSERT/UPDATE/DELETE on drugs.
+/// Standalone FTS5 (no content= table) — the triggers handle all sync.
+/// Columns: name_raw (original), name (clean), atc_code, form, lab_name.
 pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(r#"
         CREATE VIRTUAL TABLE IF NOT EXISTS drugs_fts USING fts5(
             cis,
+            name_raw,
             name,
-            name_clean,
             atc_code,
-            substance_name_clean,
             form,
-            lab_name,
-            content='drugs',
-            content_rowid='rowid'
+            lab_name
         );
 
         -- Populate from drugs table
-        INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
-        SELECT d.rowid, d.cis, d.name_raw, d.name, d.atc_code, '', d.form, d.lab_name FROM drugs d;
+        INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
+        SELECT d.cis, d.name_raw, d.name, d.atc_code, d.form, d.lab_name FROM drugs d;
 
         -- Sync triggers
         CREATE TRIGGER IF NOT EXISTS drugs_ai AFTER INSERT ON drugs BEGIN
-            INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
-            VALUES (new.rowid, new.cis, new.name_raw, new.name, new.atc_code, '', new.form, new.lab_name);
+            INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
+            VALUES (new.cis, new.name_raw, new.name, new.atc_code, new.form, new.lab_name);
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_ad AFTER DELETE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
-            VALUES ('delete', old.rowid, old.cis, old.name_raw, old.name, old.atc_code, '', old.form, old.lab_name);
+            INSERT INTO drugs_fts(drugs_fts, cis, name_raw, name, atc_code, form, lab_name)
+            VALUES ('delete', old.cis, old.name_raw, old.name, old.atc_code, old.form, old.lab_name);
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_au AFTER UPDATE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
-            VALUES ('delete', old.rowid, old.cis, old.name_raw, old.name, old.atc_code, '', old.form, old.lab_name);
-            INSERT INTO drugs_fts(rowid, cis, name, name_clean, atc_code, substance_name_clean, form, lab_name)
-            VALUES (new.rowid, new.cis, new.name_raw, new.name, new.atc_code, '', new.form, new.lab_name);
+            INSERT INTO drugs_fts(drugs_fts, cis, name_raw, name, atc_code, form, lab_name)
+            VALUES ('delete', old.cis, old.name_raw, old.name, old.atc_code, old.form, old.lab_name);
+            INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
+            VALUES (new.cis, new.name_raw, new.name, new.atc_code, new.form, new.lab_name);
         END;
     "#)?;
     Ok(())
@@ -48,11 +43,13 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// Rebuild the FTS5 index from scratch.
 ///
 /// Must be called after a full re-import of the drugs table, because
-/// `INSERT OR REPLACE` does not fire the `drugs_ad` DELETE trigger for
+/// `INSERT OR REPLACE` does not fire the drugs_ad DELETE trigger for
 /// the implicit delete, leaving orphaned FTS entries.
 pub fn rebuild_fts(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
-        "INSERT INTO drugs_fts(drugs_fts) VALUES('rebuild');",
+        "DELETE FROM drugs_fts;
+         INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
+         SELECT d.cis, d.name_raw, d.name, d.atc_code, d.form, d.lab_name FROM drugs d;"
     )?;
     Ok(())
 }
