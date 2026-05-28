@@ -43,7 +43,8 @@ fn create_test_db() -> PathBuf {
             name,
             atc_code,
             form,
-            lab_name
+            lab_name,
+            substance_name
         );
     "#).expect("Failed to create FTS table");
 
@@ -200,10 +201,12 @@ fn create_test_db() -> PathBuf {
         rusqlite::params!["test", "abc123", 100, 2, "success", 0, 0, 100]
     ).expect("Failed to insert import log");
 
-    // Populate FTS from drugs
+    // Populate FTS from drugs with substance names from compositions
     conn.execute_batch(
-        "INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name)
-         SELECT cis, name, name, atc_code, form, lab_name FROM drugs;"
+        "INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+         SELECT d.cis, d.name, d.name, d.atc_code, d.form, d.lab_name,
+                COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = d.cis), '')
+         FROM drugs d;"
     ).expect("Failed to populate FTS table");
 
     conn.close().expect("Failed to close test DB connection");

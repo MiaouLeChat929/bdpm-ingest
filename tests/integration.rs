@@ -813,6 +813,93 @@ fn asmr_orphan_flag_exists() {
 }
 
 // =============================================================================
+// SAFETY ALERTS DATA QUALITY
+// =============================================================================
+
+#[test]
+fn safety_alerts_data_quality() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    // Check safety_alerts table has rows
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM safety_alerts", [], |r| r.get(0))
+        .unwrap_or(0);
+    assert!(count > 0, "safety_alerts should have rows");
+
+    // Check all CIS codes exist in drugs table (0 orphans)
+    // Note: Some safety_alerts may reference withdrawn drugs (orphan FKs are expected per project design)
+    let orphan_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM safety_alerts WHERE cis NOT IN (SELECT cis FROM drugs)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    // Report rather than assert: orphans exist referencing withdrawn drugs
+    println!("safety_alerts orphan CIS count: {}", orphan_count);
+
+    // Check no empty message_plain
+    let empty_message_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM safety_alerts WHERE message_plain = '' OR message_plain IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    assert_eq!(empty_message_count, 0, "safety_alerts should have no empty message_plain");
+
+    // Check start_date format is ISO-8601 (YYYY-MM-DD) for non-null AND non-empty values
+    let bad_date_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM safety_alerts
+             WHERE start_date IS NOT NULL
+               AND start_date != ''
+               AND (LENGTH(start_date) != 10 OR start_date NOT LIKE '____-__-__')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    assert_eq!(bad_date_count, 0, "safety_alerts start_date should be ISO-8601 (YYYY-MM-DD)");
+}
+
+#[test]
+fn safety_alerts_date_format_iso() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: no data/bdpm.db");
+            return;
+        }
+    };
+
+    let mut stmt = conn
+        .prepare("SELECT start_date FROM safety_alerts WHERE start_date IS NOT NULL AND start_date != '' LIMIT 10")
+        .expect("safety_alerts query failed");
+
+    let dates: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .expect("safety_alerts query_map failed")
+        .filter_map(|r| r.ok())
+        .collect();
+
+    for date in dates {
+        // ISO-8601: length 10, dashes at positions 4 and 7
+        assert_eq!(date.len(), 10, "start_date '{}' should have length 10", date);
+        assert!(
+            date.chars().nth(4) == Some('-') && date.chars().nth(7) == Some('-'),
+            "start_date '{}' should have dashes at positions 4 and 7 (ISO-8601)",
+            date
+        );
+    }
+}
+
+// =============================================================================
 // FTS5 SEARCH (Full-Text Search Index)
 // =============================================================================
 
@@ -878,4 +965,34 @@ fn fts5_rebuild_produces_valid_index() {
 
     assert!(fts_count > 0, "FTS5 index should have rows");
     assert_eq!(fts_count, drugs_count, "FTS5 row count should match drugs row count");
+}
+
+#[test]
+fn fts5_search_by_substance_name() {
+    let conn = match open_db() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: data/bdpm.db not found");
+            return;
+        }
+    };
+
+    // Verify substance_name column exists in FTS5
+    let has_substance_name: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('drugs_fts') WHERE name = 'substance_name'",
+        [],
+        |r| r.get(0),
+    ).expect("Failed to check FTS5 schema");
+
+    assert_eq!(has_substance_name, 1, "FTS5 should have substance_name column");
+
+    // Search for PARACETAMOL by substance name using prefix search
+    let paracetamol_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM drugs_fts WHERE drugs_fts MATCH 'PARACETAMOL*'",
+        [],
+        |r| r.get(0),
+    ).expect("FTS5 substance search failed");
+
+    // PARACETAMOL is a very common active ingredient in the database
+    assert!(paracetamol_count > 0, "FTS5 should return results for PARACETAMOL substance search");
 }
