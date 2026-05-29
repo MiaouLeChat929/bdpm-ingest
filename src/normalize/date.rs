@@ -1,6 +1,6 @@
 /// Parse DD/MM/YYYY → "YYYY-MM-DD" (ISO-8601).
 /// Rejects dates outside 1900–2100 range.
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn parse_date_ddmmYYYY(raw: &str) -> anyhow::Result<String> {
     let parts: Vec<&str> = raw.trim().split('/').collect();
     if parts.len() != 3 {
@@ -30,7 +30,7 @@ pub fn parse_date_ddmmYYYY(raw: &str) -> anyhow::Result<String> {
 
 /// Parse YYYYMMDD (integer or string) → "YYYY-MM-DD".
 /// Rejects dates outside 1900–2100 range.
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub fn parse_date_YYYYMMDD(raw: &str) -> anyhow::Result<String> {
     let s = raw.trim();
     if s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()) {

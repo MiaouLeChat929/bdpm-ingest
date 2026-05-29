@@ -249,7 +249,6 @@ mod integration {
 
         let body: serde_json::Value = resp.json().await.expect("Failed to parse health response");
         assert_eq!(body["status"], "ok", "Health status should be 'ok'");
-        assert!(body["drug_count"].as_i64().is_some(), "Should have drug_count");
 
         // Cleanup
         server.abort();

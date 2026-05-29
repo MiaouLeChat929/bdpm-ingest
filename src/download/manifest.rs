@@ -39,7 +39,7 @@ pub struct FileSchema {
 
 /// All 11 BDPM files (10 stable + CIS_InfoImportantes for safety data).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 pub enum BDPMFile {
     /// Core drug records — CIS, name, form, route, status, dates, lab
     CIS_bdpm,

@@ -398,7 +398,7 @@ fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
     }
 }
 
-#[allow(clippy::manual_flatten)]
+#[expect(clippy::manual_flatten)]
 pub fn normalize_apostrophes(row: &mut NormalizedRow) {
     for val in &mut row.values {
         if let Some(s) = val {

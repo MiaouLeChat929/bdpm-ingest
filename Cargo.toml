@@ -62,3 +62,24 @@ rand = "0.8"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio-test = "0.4"
 tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+# TSV/tabular parsing — indexing is intentional for fixed-format fields
+indexing_slicing = "allow"
+unwrap_used = "allow"
+await_holding_lock = "warn"
+let_underscore_future = "warn"
+get_unwrap = "warn"
+unwrap_in_result = "warn"
+mem_forget = "warn"
+float_cmp = "warn"
+dbg_macro = "warn"
+allow_attributes = "warn"
+
+expect_used = "warn"
+
+[lints.rustdoc]
+missing_docs = "warn"

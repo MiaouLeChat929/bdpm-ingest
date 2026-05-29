@@ -466,14 +466,7 @@ components:
       type: object
       required:
       - status
-      - drug_count
       properties:
-        drug_count:
-          type: integer
-          format: int64
-        last_import:
-          type: string
-          nullable: true
         status:
           type: string
     Presentation:
@@ -546,3 +539,4 @@ components:
 tags:
 - name: bdpm-ingest
   description: BDPM Drug Database API
+
