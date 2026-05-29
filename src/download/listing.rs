@@ -3,13 +3,12 @@
 //! Replicates the polling logic of medicaments-api.giygas.dev independently:
 //! - Fetch the HTML listing page (/telechargement/)
 //! - Parse embedded per-file update dates from the HTML table
-//! - Compare to stored dates to detect changes without downloading files
+//! - Compare dates to detect changes without downloading files
 //!
 //! BDPM server provides no ETag, no Last-Modified, no Content-Length on TXT files.
 //! The HTML listing page is the only lightweight change-detection signal available.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use regex_lite::Regex;
 use std::sync::LazyLock;
@@ -95,37 +94,4 @@ pub fn diff_listing_dates(
     }
 
     changed
-}
-
-/// Persisted listing dates — stored alongside BLAKE3 state.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct ListingDates {
-    /// Per-filename DD/MM/YYYY date strings extracted from the HTML listing.
-    #[serde(rename = "dates")]
-    pub dates: HashMap<String, String>,
-}
-
-impl ListingDates {
-    pub fn load(state_dir: &Path) -> anyhow::Result<Self> {
-        let path = state_dir.join("listing_dates.json");
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let content = std::fs::read_to_string(&path)?;
-        match serde_json::from_str::<HashMap<String, String>>(&content) {
-            Ok(dates) => Ok(Self { dates }),
-            Err(e) => {
-                tracing::warn!("Corrupt listing dates at {}: {}. Resetting.", path.display(), e);
-                Ok(Self::default())
-            }
-        }
-    }
-
-    pub fn save(&self, state_dir: &Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(state_dir)?;
-        let path = state_dir.join("listing_dates.json");
-        let content = serde_json::to_string_pretty(&self.dates)?;
-        std::fs::write(&path, content)?;
-        Ok(())
-    }
 }

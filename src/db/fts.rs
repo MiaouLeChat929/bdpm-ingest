@@ -6,6 +6,8 @@ use rusqlite::Connection;
 /// Columns: name_raw (original), name (clean), atc_code, form, lab_name, substance_name.
 pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(r#"
+        DROP TABLE IF EXISTS drugs_fts;
+
         CREATE VIRTUAL TABLE IF NOT EXISTS drugs_fts USING fts5(
             cis,
             name_raw,

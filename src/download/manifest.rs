@@ -100,9 +100,16 @@ impl BDPMFile {
         self.schema().target_table
     }
 
+    /// True if this is the MITM/ATC file.
+    pub fn is_mitm(self) -> bool {
+        self == BDPMFile::CIS_MITM
+    }
+
     /// All 11 files in the order used by the monthly sync.
+    /// CIS_MITM comes first so atc_code can be populated inline before drugs are ingested.
     pub fn all() -> Vec<BDPMFile> {
         vec![
+            BDPMFile::CIS_MITM,
             BDPMFile::CIS_bdpm,
             BDPMFile::CIS_CIP_bdpm,
             BDPMFile::CIS_COMPO_bdpm,
@@ -111,7 +118,6 @@ impl BDPMFile {
             BDPMFile::CIS_GENER_bdpm,
             BDPMFile::CIS_CPD_bdpm,
             BDPMFile::CIS_CIP_Dispo_Spec,
-            BDPMFile::CIS_MITM,
             BDPMFile::HAS_LiensPageCT_bdpm,
             BDPMFile::CIS_InfoImportantes,
         ]
@@ -305,9 +311,10 @@ mod tests {
     }
 
     #[test]
-    fn test_all_files_order_drugs_first() {
+    fn test_all_files_order_mitm_first() {
         let all = BDPMFile::all();
-        assert_eq!(all[0], BDPMFile::CIS_bdpm);
+        assert_eq!(all[0], BDPMFile::CIS_MITM, "CIS_MITM must be first for inline atc_code population");
+        assert_eq!(all[1], BDPMFile::CIS_bdpm, "CIS_bdpm must be second");
     }
 
     #[test]

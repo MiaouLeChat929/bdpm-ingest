@@ -1,63 +1,41 @@
-//! BDPM import orchestrator
+//! BDMP import orchestrator
 //! Orchestrates: parse → normalize → dedup (compo) → dedup (state check) → import
 
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 
-use crate::db::{optimize_for_bulk_insert, rebuild_fts, restore_normal_settings};
+use crate::db::{create_fts_tables, optimize_for_bulk_insert, restore_normal_settings};
 use crate::download::manifest::BDPMFile;
-use crate::download::state::StateStore;
 use crate::download::Fetcher;
 use crate::normalize::{dedup_compo, normalize_apostrophes, normalize_row};
 use crate::parse::parse_file;
 
 pub const BDPM_URL: &str = "https://base-donnees-publique.medicaments.gouv.fr";
 
-/// Full import orchestrator
-pub fn run_import(
-    conn: &mut Connection,
-    data_dir: &Path,
-    state: &mut StateStore,
-    full: bool,
-    file_filter: Option<&str>,
-) -> Result<ImportReport> {
+/// Full ingest orchestrator — drops/recreates FTS5, imports all files in order.
+/// CIS_MITM runs first to populate atc_code inline before drugs are imported.
+pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport> {
     let raw_dir = data_dir.join("raw");
     std::fs::create_dir_all(&raw_dir)?;
     let fetcher = Fetcher::new();
 
-    // Order respects FK: drugs first (upsert), then all others
+    // Drop and recreate FTS5 from scratch — always fresh, never stale triggers
+    create_fts_tables(conn)?;
+
+    // Order: CIS_MITM first (populates atc_code inline), then all others
     let order = BDPMFile::all();
 
     let mut report = ImportReport::default();
     let start = std::time::Instant::now();
 
     for file in order {
-        // Filter if --file flag set
-        if let Some(f) = file_filter {
-            if file.filename() != f {
-                continue;
-            }
-        }
-
         let start_file = std::time::Instant::now();
 
         let url = format!("{}{}", BDPM_URL, file.download_path());
         let bytes = fetcher.fetch(&url, &raw_dir)?;
         let hash = blake3::hash(&bytes).to_hex().to_string();
         let size = bytes.len() as u64;
-
-        if !full && !state.needs_update(&file, &hash, size) {
-            report.results.push(FileImportResult {
-                file_name: file.filename().to_string(),
-                status: ImportStatus::Unchanged,
-                rows_imported: 0,
-                bad_rows: 0,
-                duration_ms: start_file.elapsed().as_millis() as u64,
-                error: None,
-            });
-            continue;
-        }
 
         // Parse
         let path = raw_dir.join(file.filename());
@@ -96,8 +74,24 @@ pub fn run_import(
         // Import
         match import_file(conn, file, &normalized) {
             Ok(stats) => {
-                state.mark_updated(&file, &hash, size);
                 let duration = start_file.elapsed().as_millis() as u64;
+
+                // Inline atc_code population: runs immediately after MITM ingest,
+                // so drugs.atc_code is available when drugs table is imported next
+                if file.is_mitm() {
+                    let updated = conn.execute(
+                        "UPDATE drugs SET atc_code = (
+                            SELECT atc_code FROM mitm WHERE mitm.cis = drugs.cis LIMIT 1
+                        ) WHERE EXISTS (SELECT 1 FROM mitm WHERE mitm.cis = drugs.cis)",
+                        [],
+                    ).unwrap_or(0);
+                    tracing::info!("Populated atc_code for {} drugs from MITM", updated);
+
+                    conn.execute(
+                        "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
+                        [],
+                    ).ok();
+                }
 
                 // Log to import_log
                 let _ = conn.execute(
@@ -286,13 +280,6 @@ fn import_file(
         drop(stmt);
         tx.commit()?;
 
-        // Post-import: rebuild FTS5 index after drugs table changes
-        // INSERT OR REPLACE doesn't fire the drugs_ad DELETE trigger for the
-        // implicit delete, leaving orphaned FTS entries. Rebuild fixes this.
-        if file == BDPMFile::CIS_bdpm {
-            rebuild_fts(conn).ok();
-        }
-
         // Post-import: flag orphan rows (withdrawn drugs not in drugs table)
         // BRIEF.md: 2,806 SMR / 1,567 ASMR / 2,503 GENER orphan rows expected
         if matches!(file, BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm | BDPMFile::CIS_GENER_bdpm) {
@@ -308,21 +295,6 @@ fn import_file(
                 )?;
                 tracing::info!("{table}: flagged {} orphan rows", orphan_count);
             }
-        }
-
-        // Post-import: populate drugs.atc_code from MITM data
-        if file == BDPMFile::CIS_MITM {
-            let updated = conn.execute(
-                "UPDATE drugs SET atc_code = (SELECT atc_code FROM mitm WHERE mitm.cis = drugs.cis)",
-                [],
-            ).unwrap_or(0);
-            tracing::info!("Populated atc_code for {} drugs from MITM data", updated);
-
-            let atc_codes_count = conn.execute(
-                "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
-                [],
-            ).unwrap_or(0);
-            tracing::info!("Inserted {} distinct ATC codes", atc_codes_count);
         }
 
         Ok(stats)

@@ -10,42 +10,27 @@ mod api;
 mod db;
 mod download;
 mod import;
-mod sync;
 mod normalize;
 mod parse;
 
 use crate::db::init_db;
-use crate::download::{state::StateStore, Fetcher, fetch_listing_dates, diff_listing_dates, ListingDates};
+use crate::download::{Fetcher, fetch_listing_dates, diff_listing_dates, BDPM_URL};
 use crate::download::manifest::BDPMFile;
-use crate::import::run_import;
-use crate::sync::detect_changes;
-
-fn state_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("import_state.json")
-}
+use crate::import::run_ingest;
 
 #[derive(Parser)]
 #[command(name = "bdpm-ingest")]
-#[command(about = "BDPM drug database ingest pipeline")]
+#[command(about = "BDMP drug database ingest pipeline")]
 enum Command {
-    /// Check which files have changed (no download)
-    Check {
-        #[arg(long, default_value = "data")]
-        data_dir: PathBuf,
-    },
     /// Fetch all files from BDPM
     Fetch {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
     },
-    /// Full pipeline: fetch + parse + validate + normalize + import
-    Import {
+    /// Full rebuild: drop/create DB, import from raw/, build FTS5
+    Ingest {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
-        #[arg(long, short)]
-        full: bool,
-        #[arg(long)]
-        file: Option<String>,
     },
     /// Print row counts and schema summary
     Stats {
@@ -59,27 +44,12 @@ enum Command {
         #[arg(long, default_value = "10")]
         limit: usize,
     },
-    /// Poll BDPM HTML listing page for file date changes (no download).
-    /// Reimplements medicaments-api.giygas.dev polling logic independently.
+    /// Poll BDPM HTML listing page for file date changes (stateless).
     /// Fetches ~5-10 Ko HTML page, parses embedded per-file update dates, reports changes.
     Poll {
-        #[arg(long, default_value = "data")]
-        data_dir: PathBuf,
-    },
-    /// Detect changed files and print a sync plan (dry run, no import).
-    Sync {
-        #[arg(long, default_value = "data")]
-        data_dir: PathBuf,
-    },
-    /// Sync only the weekly availability file (CIS_CIP_Dispo_Spec).
-    Dispo {
-        #[arg(long, default_value = "data")]
-        data_dir: PathBuf,
-    },
-    /// Rebuild the FTS5 full-text search index from scratch.
-    FtsRebuild {
-        #[arg(long, default_value = "data/bdpm.db")]
-        db_path: PathBuf,
+        /// Previous listing dates file to compare against
+        #[arg(long)]
+        prev: Option<PathBuf>,
     },
     /// Start the HTTP API server for drug search.
     Serve {
@@ -102,7 +72,7 @@ fn main() -> Result<()> {
     match cmd {
         Command::Serve { addr, db_path } => {
             if !db_path.exists() {
-                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest ingest' first.", db_path.display());
             }
             println!("Starting server on {}...", addr);
             let rt = tokio::runtime::Runtime::new()?;
@@ -115,57 +85,34 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        Command::Check { data_dir } => {
-            std::fs::create_dir_all(&data_dir)?;
-            std::fs::create_dir_all(data_dir.join("raw"))?;
-            let state = StateStore::load_or_create(&state_path(&data_dir))?;
-            let fetcher = Fetcher::new();
-
-            for file in BDPMFile::all() {
-                let url = format!("{}{}", download::BDPM_URL, file.download_path());
-                let bytes = fetcher.fetch(&url, &data_dir.join("raw"))?;
-                let hash = blake3::hash(&bytes).to_hex().to_string();
-                let size = bytes.len() as u64;
-
-                if state.needs_update(&file, &hash, size) {
-                    println!("{}: CHANGED", file.filename());
-                } else {
-                    println!("{}: unchanged", file.filename());
-                }
-            }
-        }
-
         Command::Fetch { data_dir } => {
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(data_dir.join("raw"))?;
             let fetcher = Fetcher::new();
 
             for file in BDPMFile::all() {
-                let url = format!("{}{}", download::BDPM_URL, file.download_path());
+                let url = format!("{}{}", BDPM_URL, file.download_path());
                 let bytes = fetcher.fetch(&url, &data_dir.join("raw"))?;
                 let hash = blake3::hash(&bytes).to_hex().to_string();
                 println!("{}: {} bytes, hash={}", file.filename(), bytes.len(), &hash[..8]);
             }
         }
 
-        Command::Import { data_dir, full, file } => {
+        Command::Ingest { data_dir } => {
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(data_dir.join("raw"))?;
 
-            let mut state = StateStore::load_or_create(&state_path(&data_dir))?;
             let db_path = data_dir.join("bdpm.db");
             let mut conn = init_db(&db_path);
 
-            let report = run_import(&mut conn, &data_dir, &mut state, full, file.as_deref())?;
+            let report = run_ingest(&data_dir, &mut conn)?;
             report.print();
-
-            state.save(&state_path(&data_dir))?;
         }
 
         Command::Stats { data_dir } => {
             let db_path = data_dir.join("bdpm.db");
             if !db_path.exists() {
-                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest ingest' first.", db_path.display());
             }
             let conn = rusqlite::Connection::open(&db_path)?;
 
@@ -186,7 +133,7 @@ fn main() -> Result<()> {
         Command::Logs { data_dir, limit } => {
             let db_path = data_dir.join("bdpm.db");
             if !db_path.exists() {
-                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest ingest' first.", db_path.display());
             }
             let conn = rusqlite::Connection::open(&db_path)?;
 
@@ -214,92 +161,40 @@ fn main() -> Result<()> {
             }
         }
 
-        Command::Poll { data_dir } => {
-            std::fs::create_dir_all(&data_dir)?;
+        Command::Poll { prev } => {
             let fetcher = Fetcher::new();
-
-            // Load stored listing dates
-            let stored = ListingDates::load(&data_dir)?;
 
             // Fetch fresh listing page and parse dates
             let fresh = fetch_listing_dates(&fetcher)?;
 
             // Show all parsed dates
-            println!("{:<30} {:<15} {:<15}", "file", "listing date", "stored date");
-            println!("{}", "-".repeat(60));
+            println!("{:<30} {:<15}", "file", "listing date");
+            println!("{}", "-".repeat(50));
             for file in BDPMFile::all() {
                 let fname = file.filename();
                 let fd = fresh.get(fname).map(|s| s.as_str()).unwrap_or("—");
-                let sd = stored.dates.get(fname).map(|s| s.as_str()).unwrap_or("—");
-                let flag = if fresh.get(fname) != stored.dates.get(fname) {
-                    " ← CHANGED"
-                } else {
-                    ""
-                };
-                println!("{:<30} {:<15} {:<15}{}", fname, fd, sd, flag);
+                println!("{:<30} {:<15}", fname, fd);
             }
 
-            // Diff and report
-            let changed = diff_listing_dates(&fresh, &stored.dates);
-            if changed.is_empty() {
-                println!("\nNo changes detected.");
-            } else {
-                println!("\nChanged files: {}",
-                    changed.iter().map(|f| f.filename()).collect::<Vec<_>>().join(", "));
-            }
+            // If previous dates file provided, diff against it
+            if let Some(prev_path) = prev {
+                if prev_path.exists() {
+                    let content = std::fs::read_to_string(&prev_path)?;
+                    let stored: std::collections::HashMap<String, String> =
+                        serde_json::from_str(&content).unwrap_or_default();
 
-            // Save fresh dates to disk
-            let fresh_state = ListingDates { dates: fresh };
-            fresh_state.save(&data_dir)?;
-            println!("Listing dates updated.");
-        }
-
-        Command::Sync { data_dir } => {
-            std::fs::create_dir_all(&data_dir)?;
-            std::fs::create_dir_all(data_dir.join("raw"))?;
-            let state = StateStore::load_or_create(&state_path(&data_dir))?;
-
-            let plans = detect_changes(&data_dir, &state)?;
-            if plans.is_empty() {
-                println!("No changes detected.");
-            } else {
-                println!("Sync plan ({} files):", plans.len());
-                for plan in &plans {
-                    let reason = match plan.reason {
-                        sync::ChangeReason::NewFile => "NEW",
-                        sync::ChangeReason::HashChanged => "HASH_CHANGED",
-                        sync::ChangeReason::SizeChanged => "SIZE_CHANGED",
-                    };
-                    println!("  {} {} {} bytes hash={}", reason, plan.file.filename(), plan.size, &plan.hash[..8]);
+                    let changed = diff_listing_dates(&fresh, &stored);
+                    if changed.is_empty() {
+                        println!("\nNo changes detected.");
+                    } else {
+                        println!("\nChanged files: {}",
+                            changed.iter().map(|f| f.filename()).collect::<Vec<_>>().join(", "));
+                    }
+                    return Ok(());
                 }
-
-                println!("\nRun 'bdpm-ingest import' to import these files.");
             }
-        }
 
-        Command::Dispo { data_dir } => {
-            std::fs::create_dir_all(&data_dir)?;
-            std::fs::create_dir_all(data_dir.join("raw"))?;
-
-            let mut state = StateStore::load_or_create(&state_path(&data_dir))?;
-            let db_path = data_dir.join("bdpm.db");
-            let mut conn = init_db(&db_path);
-
-            let report = run_import(&mut conn, &data_dir, &mut state, false, Some("CIS_CIP_Dispo_Spec.txt"))?;
-            report.print();
-
-            state.save(&state_path(&data_dir))?;
-        }
-
-        Command::FtsRebuild { db_path } => {
-            if !db_path.exists() {
-                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest import' first.", db_path.display());
-            }
-            let conn = rusqlite::Connection::open(&db_path)?;
-            println!("Rebuilding FTS5 index...");
-            crate::db::rebuild_fts(&conn)?;
-            let count: i64 = conn.query_row("SELECT COUNT(*) FROM drugs_fts", [], |r| r.get(0))?;
-            println!("FTS5 index rebuilt: {} entries.", count);
+            println!("\nRun with --prev <file> to detect changes from a previous poll.");
         }
     }
 

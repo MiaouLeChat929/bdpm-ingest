@@ -1,6 +1,6 @@
 pub mod fts;
 
-pub use fts::rebuild_fts;
+pub use fts::{create_fts_tables};
 
 use rusqlite::Connection;
 
