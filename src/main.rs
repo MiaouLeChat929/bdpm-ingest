@@ -81,7 +81,7 @@ fn main() -> Result<()> {
         }
 
         Command::DumpOpenApi => {
-            println!("{}", api::openapi_static::OPENAPI_YAML);
+            println!("{}", api::openapi::OPENAPI_YAML);
             return Ok(());
         }
 

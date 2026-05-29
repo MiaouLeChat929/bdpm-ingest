@@ -42,7 +42,7 @@ pub async fn openapi_json() -> impl axum::response::IntoResponse {
 
 /// Serve the OpenAPI spec as YAML — static file, no serde_yaml needed.
 /// Regenerate with: cargo run -- dump-open-api > src/api/openapi.yaml
-const OPENAPI_YAML: &str = include_str!("openapi.yaml");
+pub const OPENAPI_YAML: &str = include_str!("openapi.yaml");
 
 pub async fn openapi_yaml() -> impl axum::response::IntoResponse {
     ([("content-type", "application/x-yaml")], OPENAPI_YAML)

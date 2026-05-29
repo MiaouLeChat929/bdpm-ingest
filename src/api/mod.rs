@@ -7,7 +7,6 @@ pub mod availability;
 pub mod drugs;
 pub mod groups;
 pub mod openapi;
-pub mod openapi_static;
 pub mod safety;
 pub mod search;
 
