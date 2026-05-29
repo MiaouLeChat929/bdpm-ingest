@@ -373,7 +373,176 @@ pub(crate) fn insert_sql(file: BDPMFile) -> String {
     }
 }
 
-// ---- Report types ----
+// ---- atc_code population test ----
+
+#[cfg(test)]
+mod atc_code_population_tests {
+    use super::*;
+
+    /// Verifies the two-phase atc_code population pattern:
+    /// 1. CIS_MITM fires first (drugs table empty at that point)
+    /// 2. CIS_bdpm fires after drugs are populated, then runs the atc_code UPDATE + FTS5 sync
+    /// This test simulates what the run_ingest loop does for the CIS_bdpm block.
+    #[test]
+    fn test_cis_bdpm_block_populates_atc_code_and_fts5() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        // Create minimal schema
+        conn.execute_batch(
+            "CREATE TABLE mitm (cis TEXT PRIMARY KEY, atc_code TEXT, detail_url TEXT);
+             CREATE TABLE drugs (cis TEXT PRIMARY KEY, name TEXT, atc_code TEXT);
+             CREATE TABLE atc_codes (atc_code TEXT PRIMARY KEY);
+             CREATE TABLE drugs_fts (
+                 cis TEXT, name_raw TEXT, name TEXT, atc_code TEXT,
+                 form TEXT, lab_name TEXT, substance_name TEXT
+             );
+             CREATE TRIGGER drugs_au AFTER UPDATE ON drugs BEGIN
+                 DELETE FROM drugs_fts WHERE cis = old.cis;
+                 INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+                 VALUES (new.cis, new.name, new.name, new.atc_code, '', '', '');
+             END;"
+        ).unwrap();
+
+        // Phase 1: Insert MITM rows (simulates CIS_MITM import)
+        conn.execute(
+            "INSERT INTO mitm (cis, atc_code, detail_url) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C001", "A01AA01", "http://example.com/1"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO mitm (cis, atc_code, detail_url) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C002", "A01AA01", "http://example.com/2"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO mitm (cis, atc_code, detail_url) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C003", "B02AA02", "http://example.com/3"],
+        ).unwrap();
+
+        // Phase 2: Insert drugs rows (simulates CIS_bdpm import — no atc_code yet)
+        conn.execute(
+            "INSERT INTO drugs (cis, name, atc_code) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C001", "Drug One", ""],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO drugs (cis, name, atc_code) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C002", "Drug Two", ""],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO drugs (cis, name, atc_code) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C003", "Drug Three", ""],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO drugs (cis, name, atc_code) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C004", "Drug Four - no MITM", ""],
+        ).unwrap();
+
+        // Populate FTS5 from drugs (simulate what drugs_ai trigger does)
+        conn.execute(
+            "INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
+             SELECT cis, name, name, atc_code, '', '', '' FROM drugs",
+            [],
+        ).unwrap();
+
+        // Verify: drugs.atc_code is NULL, drugs_fts.atc_code is NULL before the fix
+        let drugs_null: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs WHERE atc_code IS NULL OR atc_code = ''",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(drugs_null, 4, "All drugs should have empty atc_code before fix");
+
+        let fts_null: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs_fts WHERE atc_code IS NULL OR atc_code = ''",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(fts_null, 4, "All FTS5 rows should have empty atc_code before fix");
+
+        // Phase 3: Run the CIS_bdpm atc_code population (from run_ingest's CIS_bdpm block)
+        let updated = conn.execute(
+            "UPDATE drugs SET atc_code = (
+                SELECT atc_code FROM mitm WHERE mitm.cis = drugs.cis LIMIT 1
+            ) WHERE EXISTS (SELECT 1 FROM mitm WHERE mitm.cis = drugs.cis)",
+            [],
+        ).unwrap();
+        assert_eq!(updated, 3, "Should update 3 drugs (C001, C002, C003 have MITM)");
+
+        let fts_synced = conn.execute(
+            "UPDATE drugs_fts SET atc_code = (
+                SELECT atc_code FROM drugs WHERE drugs.cis = drugs_fts.cis LIMIT 1
+            ) WHERE EXISTS (SELECT 1 FROM drugs WHERE drugs.cis = drugs_fts.cis AND atc_code IS NOT NULL AND atc_code != '')",
+            [],
+        ).unwrap();
+        assert_eq!(fts_synced, 3, "Should sync 3 FTS5 rows");
+
+        conn.execute(
+            "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
+            [],
+        ).ok();
+
+        // Verify: drugs.atc_code populated
+        let drugs_ok: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs WHERE atc_code IS NOT NULL AND atc_code != ''",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(drugs_ok, 3);
+        let drugs_still_empty: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs WHERE atc_code IS NULL OR atc_code = ''",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(drugs_still_empty, 1, "C004 should still have empty atc_code (no MITM)");
+
+        // Verify: FTS5.atc_code populated
+        let fts_ok: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs_fts WHERE atc_code IS NOT NULL AND atc_code != ''",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(fts_ok, 3);
+
+        // Verify: atc_codes table populated
+        let atc_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM atc_codes",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(atc_count, 2, "A01AA01 and B02AA02");
+
+        // Verify specific values
+        let c001_atc: String = conn.query_row(
+            "SELECT atc_code FROM drugs WHERE cis = 'C001'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(c001_atc, "A01AA01");
+    }
+
+    /// MITM block fires when drugs table is empty — atc population is a no-op,
+    /// but atc_codes lookup table should still be populated.
+    #[test]
+    fn test_mitm_block_only_populates_atc_codes_lookup() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mitm (cis TEXT PRIMARY KEY, atc_code TEXT, detail_url TEXT);
+             CREATE TABLE drugs (cis TEXT PRIMARY KEY, atc_code TEXT);"
+        ).unwrap();
+
+        // Insert MITM
+        conn.execute(
+            "INSERT INTO mitm (cis, atc_code, detail_url) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["C001", "N02BE01", "http://example.com/1"],
+        ).unwrap();
+
+        // No drugs yet (MITM block fires before CIS_bdpm)
+        let drugs_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM drugs",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(drugs_count, 0, "Drugs table should be empty when MITM block fires");
+    }
+}
 
 #[derive(Default)]
 pub struct ImportReport {

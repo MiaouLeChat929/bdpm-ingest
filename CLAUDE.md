@@ -32,9 +32,9 @@ Single test: `cargo test test_name_here --lib`
 | `fetch` | Download all 10 BDPM files to `raw/` |
 | `ingest` | Full rebuild: drop/create DB, import from `raw/`, build FTS5 |
 | `serve --addr 127.0.0.1:8080` | HTTP API server (read-only) |
-| `poll [--prev file]` | Fetch listing page, print dates, diff against saved poll output |
+| `poll --prev <file>` | Fetch listing page, print dates, diff against saved poll output |
 | `stats` | Row counts per table |
-| `logs [--limit N]` | Import history |
+| `logs --limit N` | Import history |
 | `dump-open-api` | Output OpenAPI YAML |
 
 **Regenerate OpenAPI spec** after changing endpoint schemas: `cargo run --release -- dump-open-api > src/api/openapi.yaml && git add src/api/openapi.yaml`
@@ -48,17 +48,17 @@ fetch          → raw/*.txt (Windows-1252 TSV files)
     ↓
 ingest         → bdpm.db (always fresh)
     ├─ DROP + CREATE FTS5 (at start)
-    ├─ MITM before drugs (populate atc_code inline)
-    └─ triggers sync FTS5 on INSERT
+    ├─ CIS_MITM first (populates atc_codes lookup)
+    └─ CIS_bdpm → atc_code populated from MITM, FTS5 synced
 ```
 
-Import order matters: MITM must complete before drugs for `drugs.atc_code` to be populated before FTS5 indexing.
+Import order matters: CIS_MITM must complete before CIS_bdpm so MITM atc_code data is available for population.
 
 ## Key Design Decisions
 
 **Homeopathic drugs filtered at import.** `normalize_row()` returns `Option<NormalizedRow>` — `None` for procedure type containing `ENREG HOM` (case-insensitive). Filtered via `filter_map()` in the import loop. Child tables reject orphans via FK constraints.
 
-**FTS5 standalone triggers (no external content).** `DROP TABLE IF EXISTS + CREATE VIRTUAL TABLE` at ingest start. Triggers use explicit `DELETE` + `INSERT`. Not `'rebuild'` command or `content=` mode.
+**FTS5 standalone with explicit sync.** `DROP TABLE IF EXISTS + CREATE VIRTUAL TABLE` at ingest start. INSERT triggers sync on new rows. UPDATE triggers fire DELETE+INSERT (which reads new values as NULL per SQLite semantics — see rusqlite pattern #11). After CIS_bdpm import, explicit UPDATE syncs FTS5.atc_code from drugs.atc_code.
 
 **Windows-1252 encoding.** 7 of 10 files use Windows-1252, 2 use UTF-8, 1 uses Latin-1. BDPM server returns no charset header. Decode at file-open time in `TabParser::from_path()`.
 
@@ -89,6 +89,8 @@ These will break silently if violated:
 9. **FTS5 column names independent of source table** — With `content=''`, FTS5 column names are arbitrary. Triggers insert by position, not name.
 
 10. **SQLite dynamic typing: empty string is not NULL** — Always filter by type first: `WHERE typeof(dosage_mg) = 'real' AND dosage_mg > N`.
+
+11. **UPDATE trigger fires DELETE+INSERT with uncommitted row state** — When `UPDATE drugs SET atc_code = ...` fires, the FTS5 `drugs_au` trigger reads `new.atc_code` as NULL (uncommitted). FTS5 sync must be a separate explicit UPDATE. See `src/import/mod.rs` CIS_bdpm block for the two-phase pattern.
 
 ## Parsing Safety Rule
 
