@@ -58,6 +58,7 @@ pub struct DrugSearchResult {
 ///
 /// Returns up to `limit` drugs matching the query string.
 /// Uses `spawn_blocking` because rusqlite is blocking, not async.
+/// Results are cached for 5 minutes using moka sync cache.
 #[utoipa::path(
     get,
     path = "/drugs",
@@ -87,6 +88,16 @@ pub async fn search_drugs(
     let fts_query = format!("{}*", sanitized);
     let limit = params.limit as i64;
 
+    // Build cache key from query + sort + limit
+    let sort_key = params.sort.clone().unwrap_or_else(|| "name".to_string());
+    let order_key = params.order.clone().unwrap_or_else(|| "asc".to_string());
+    let cache_key = format!("{}:{}:{}:{}", fts_query, sort_key, order_key, limit);
+
+    // Check cache first
+    if let Some(cached) = state.search_cache.get(&cache_key) {
+        return Json(cached.clone());
+    }
+
     let results = tokio::task::spawn_blocking(move || -> Vec<DrugSearchResult> {
         let conn = match crate::db::open_api_conn(&state.db_path) {
             Ok(c) => c,
@@ -100,7 +111,7 @@ pub async fn search_drugs(
             ("lab_name", "d.lab_name"),
             ("atc_code", "d.atc_code"),
         ];
-        let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
+        let order_by = sort_clause(Some(&sort_key), Some(&order_key), &allowed);
 
         let sql = format!(
             "SELECT d.cis, d.name, d.form, d.lab_name FROM drugs d \
@@ -129,6 +140,9 @@ pub async fn search_drugs(
         tracing::error!("Search task failed: {e}");
         vec![]
     });
+
+    // Cache the results
+    state.search_cache.insert(cache_key, results.clone());
 
     Json(results)
 }

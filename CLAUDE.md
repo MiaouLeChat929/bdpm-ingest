@@ -27,10 +27,12 @@ cargo check
 cargo clippy -- -D warnings
 
 # Regenerate OpenAPI spec (commit after regenerating)
-./target/release/bdpm-ingest dump-open-api > openapi.yaml
+cargo run --release -- dump-open-api > openapi.yaml
 ```
 
 Single test: `cargo test test_name_here --lib`
+
+**IMPORTANT: always use `cargo run --release --` instead of `./target/release/bdpm-ingest`.** With a shared `CARGO_TARGET_DIR`, cargo hard-links the binary into `./target/release/`, but this link can go stale — the project-local binary won't update even after `cargo build --release` succeeds. `cargo run` always uses the fresh binary from the shared target. If you must use the binary directly, verify the timestamp with `stat target/release/bdpm-ingest | grep Modify` after building.
 
 ## CLI Commands
 
@@ -118,6 +120,8 @@ These will break silently if violated:
 8. **`Option<T>` + `filter_map` for ETL filtering** — The idiomatic Rust pattern for "transform or skip" at normalize time. `normalize_row() -> Option<NormalizedRow>` returning `None` for filtered rows, consumed via `filter_map()` in the import loop. For two-pass filtering (exclude CIS from file A based on file B), use a pre-scan `HashSet<String>`, not `Arc<Mutex<HashSet>>`.
 
 9. **FTS5 column names must be independent of source table** — With `content=''`, FTS5 column names are arbitrary (no mapping to source table). With `content='table'`, FTS5 column names MUST match source table column names exactly or all queries fail with "no such column: T.X". Triggers insert by position, not name, so trigger column lists can use `new.any_column_name` regardless of FTS column names.
+
+10. **SQLite dynamic typing: empty string is not NULL** — SQLite columns declared `REAL` accept any type. When `dosage_mg` is `None`, the binding `unwrap_or("")` inserts an empty string, not SQL NULL. Comparisons like `WHERE dosage_mg > 10000` match empty strings as text (truthy in some collations). Always filter by type first: `WHERE typeof(dosage_mg) = 'real' AND dosage_mg > N`.
 
 ## Parsing Safety Rule
 

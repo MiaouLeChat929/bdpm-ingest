@@ -2,6 +2,7 @@ use axum::{extract::State, http::StatusCode, middleware::from_fn, response::Json
 use serde::Serialize;
 use std::path::PathBuf;
 use tokio::task::spawn_blocking;
+use tower_http::cors::{Any, CorsLayer};
 
 pub mod atc;
 pub mod availability;
@@ -15,6 +16,7 @@ pub mod search;
 #[derive(Clone)]
 pub struct AppState {
     pub db_path: PathBuf,
+    pub search_cache: crate::cache::SearchCache,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -25,7 +27,8 @@ pub struct HealthResponse {
 }
 
 pub fn build_app(db_path: PathBuf) -> Router {
-    let state = AppState { db_path };
+    let search_cache = crate::cache::create_search_cache();
+    let state = AppState { db_path, search_cache };
     Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(openapi::openapi_json))
@@ -39,6 +42,7 @@ pub fn build_app(db_path: PathBuf) -> Router {
         .route("/atc/{code}", get(atc::atc_detail))
         .route("/availability", get(availability::availability))
         .with_state(state)
+        .layer(CorsLayer::new().allow_origin(Any).allow_methods([axum::http::Method::GET]).max_age(std::time::Duration::from_secs(86400)))
         .layer(from_fn(rate_limit::rate_limit_filter))
 }
 
