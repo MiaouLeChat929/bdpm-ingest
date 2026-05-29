@@ -19,17 +19,22 @@ pub fn open_api_conn(path: &std::path::Path) -> Result<Connection, rusqlite::Err
 /// Initialize database: execute schema.sql and create FTS5 virtual table.
 /// Dev mode: always runs --full import after this, so schema is fresh each time.
 pub fn init_db(path: &std::path::Path) -> Connection {
+    // All failures here are fatal init errors: unrecoverable without a working DB.
+    #[expect(clippy::expect_used, reason = "Fatal init: database file must open successfully")]
     let conn = Connection::open(path).expect("Failed to open database");
 
+    #[expect(clippy::expect_used, reason = "Fatal init: WAL+PRAGMA must succeed or the process cannot operate")]
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;"
     ).expect("Failed to set PRAGMA");
 
     // Execute consolidated schema (all 7 migrations merged into one SQL file)
     let schema = include_str!("schema.sql");
+    #[expect(clippy::expect_used, reason = "Fatal init: schema DDL must succeed")]
     conn.execute_batch(schema).expect("Schema initialization failed");
 
     // Create FTS5 virtual table and sync triggers
+    #[expect(clippy::expect_used, reason = "Fatal init: FTS5 setup must succeed")]
     fts::create_fts_tables(&conn).expect("FTS5 initialization failed");
 
     tracing::info!("Database initialized at {}", path.display());

@@ -70,6 +70,7 @@ unsafe_code = "forbid"
 # TSV/tabular parsing — indexing is intentional for fixed-format fields
 indexing_slicing = "allow"
 unwrap_used = "allow"
+upper_case_acronyms = "warn"
 await_holding_lock = "warn"
 let_underscore_future = "warn"
 get_unwrap = "warn"

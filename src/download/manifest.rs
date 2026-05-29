@@ -8,7 +8,9 @@ pub enum Encoding {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(clippy::upper_case_acronyms)]
+// DateFormat variants intentionally use PascalCase with embedded abbreviations (e.g. DDMMYYYY).
+// clippy::upper_case_acronyms fires on this pattern but the variants are self-documenting.
+#[expect(clippy::upper_case_acronyms)]
 pub enum DateFormat {
     /// DD/MM/YYYY — e.g., "28/04/2026"
     DDMMYYYY,

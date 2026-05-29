@@ -65,9 +65,12 @@ pub(crate) fn sort_clause(sort: Option<&str>, order: Option<&str>, allowed: &[(&
 }
 
 /// Start the axum HTTP server on the given address.
+/// All errors here are fatal startup errors — propagate is correct.
 pub async fn run_server(addr: &str, db_path: PathBuf) {
     let app = build_app(db_path);
+    #[expect(clippy::expect_used, reason = "Fatal startup error: TCP bind failure is unrecoverable")]
     let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind address");
+    #[expect(clippy::expect_used, reason = "Fatal startup error: server loop error terminates the process")]
     axum::serve(listener, app).await.expect("Server error");
 }
 
