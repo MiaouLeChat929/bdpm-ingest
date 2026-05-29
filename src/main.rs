@@ -18,7 +18,8 @@ mod parse;
 use crate::db::init_db;
 use crate::download::{state::StateStore, Fetcher, fetch_listing_dates, diff_listing_dates, ListingDates};
 use crate::download::manifest::BDPMFile;
-use crate::sync::{run_sync, run_dispo_sync, detect_changes};
+use crate::import::run_import;
+use crate::sync::detect_changes;
 
 fn state_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("import_state.json")
@@ -158,7 +159,7 @@ fn main() -> Result<()> {
             let db_path = data_dir.join("bdpm.db");
             let mut conn = init_db(&db_path);
 
-            let report = run_sync(&mut conn, &data_dir, &mut state, full, file.as_deref())?;
+            let report = run_import(&mut conn, &data_dir, &mut state, full, file.as_deref())?;
             report.print();
 
             state.save(&state_path(&data_dir))?;
@@ -287,7 +288,7 @@ fn main() -> Result<()> {
             let db_path = data_dir.join("bdpm.db");
             let mut conn = init_db(&db_path);
 
-            let report = run_dispo_sync(&mut conn, &data_dir, &mut state)?;
+            let report = run_import(&mut conn, &data_dir, &mut state, false, Some("CIS_CIP_Dispo_Spec.txt"))?;
             report.print();
 
             state.save(&state_path(&data_dir))?;

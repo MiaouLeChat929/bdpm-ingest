@@ -48,6 +48,10 @@ Single test: `cargo test test_name_here --lib`
 ./target/release/bdpm-ingest dump-open-api                       # output OpenAPI YAML to stdout
 ```
 
+## Dev Workflow
+
+**Always use `--full` during development.** The DB is recreated from scratch on each import — no incremental state, no migration runner. `init_db()` runs the consolidated `schema.sql` (all tables, indexes, constraints in one file) and creates FTS5 via `fts::create_fts_tables()`. There are no migration files; the schema is a single source of truth at `src/db/schema.sql`.
+
 ## Architecture
 
 ```
@@ -56,9 +60,9 @@ Pipeline: fetch → parse → normalize → dedup → import
 Key types: BDPMFile (central routing enum, 10 files), NormalizedRow (table + values)
 Key modules: download/ (fetch + state + listing), parse/ (TabParser, encoding detection),
              normalize/ (row transformers, dedup, price/date/HTML fields),
-             import/ (orchestrator, bulk insert), db/ (SQLite + FTS5 + migrations),
+             import/ (orchestrator, bulk insert), db/ (SQLite + FTS5, consolidated schema.sql),
              api/ (axum HTTP server, search, drugs, ATC, availability),
-             cache/ (TTL cache), sync/ (change detection + sync plans)
+             cache/ (TTL cache), sync/ (change detection)
 ```
 
 ## Key Design Decisions
@@ -114,4 +118,12 @@ These will break silently if violated:
 8. **`Option<T>` + `filter_map` for ETL filtering** — The idiomatic Rust pattern for "transform or skip" at normalize time. `normalize_row() -> Option<NormalizedRow>` returning `None` for filtered rows, consumed via `filter_map()` in the import loop. For two-pass filtering (exclude CIS from file A based on file B), use a pre-scan `HashSet<String>`, not `Arc<Mutex<HashSet>>`.
 
 9. **FTS5 column names must be independent of source table** — With `content=''`, FTS5 column names are arbitrary (no mapping to source table). With `content='table'`, FTS5 column names MUST match source table column names exactly or all queries fail with "no such column: T.X". Triggers insert by position, not name, so trigger column lists can use `new.any_column_name` regardless of FTS column names.
+
+## Parsing Safety Rule
+
+**Every parsing bug or data incoherence fix MUST include a unit test that would have caught the bug.** This is non-negotiable — regression prevention is mandatory for all parser/normalizer changes.
+
+- The test must use the EXACT raw input that triggered the bug, demonstrating the wrong output before fix and correct output after
+- For edge case classes (e.g., "all dosage strings containing `M.U.I.`"), add at least representative samples from each sub-pattern
+- Run `cargo test --lib` before committing to confirm the test fails on old code and passes on new code
 

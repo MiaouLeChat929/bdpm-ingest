@@ -4,6 +4,9 @@ pub mod fields;
 pub mod html;
 pub mod dedup;
 
+use std::sync::LazyLock;
+use regex_lite::Regex;
+
 pub use price::parse_price_cents;
 pub use date::{parse_date_ddmmYYYY, parse_date_YYYYMMDD};
 pub use fields::{strip_field, normalize_generic_type, normalize_spaces};
@@ -89,12 +92,70 @@ fn parse_dosage_mg(raw: &str) -> Option<String> {
     // Normalize: lowercase and handle common variations
     let normalized = trimmed.to_lowercase();
 
+    // --- PHASE 1: Pre-filter rejection (return None early) ---
+
+    // Biological cell counts ("cellule" exact, or "cell" as standalone word)
+    if normalized.contains("cellule") || normalized.split_whitespace().any(|w| w == "cell") {
+        return None;
+    }
+
+    // Radioactivity units
+    if normalized.contains("mbq") || normalized.contains("gbq") || normalized.contains("bq") {
+        return None;
+    }
+
+    // Gas pressure context
+    if normalized.contains("bar") {
+        return None;
+    }
+
+    // Temperature context
+    if normalized.contains("°c") {
+        return None;
+    }
+
+    // Viral/bacterial titers
+    if normalized.contains("ufp") || normalized.contains("dicc") || normalized.contains("dict") {
+        return None;
+    }
+
+    // Genome counts
+    if normalized.contains("génome") || normalized.contains("genome") {
+        return None;
+    }
+
+    // Pure percentage (no weight units) — a ratio, not a weight dosage
+    // Allow mg/g compounds with % purity: "700 mg (5 % m/m)"
+    if normalized.contains('%')
+        && !normalized.contains("mg")
+        && !normalized.contains("µg")
+        && !normalized.contains("mcg")
+        && !normalized.contains("micro")
+        && !normalized.contains('g')
+    {
+        return None;
+    }
+
+    // International Units with various formatting
+    // "ui" already catches plain UI, but dots break substring: "u.i", "u.i.", "m.u.i"
+    if normalized.contains("u.i") || normalized.contains("m.u.i") {
+        return None;
+    }
+
     // Check for non-weight units (UI, etc.) — return None
     // Note: "unite" must match accented "unités" too
     if normalized.contains("ui")
         || normalized.contains("unite")
         || normalized.contains("million")
     {
+        return None;
+    }
+
+    // Standalone "U" unit (International Unit variant, e.g., "2500 U (2,5 mg)")
+    // Already lowercase, so match lowercase "u" as whole word
+    static U_UNIT_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?:^|\s|\d)u(?:\s|\(|$)").unwrap());
+    if U_UNIT_RE.is_match(&normalized) {
         return None;
     }
 
@@ -118,40 +179,53 @@ fn parse_dosage_mg(raw: &str) -> Option<String> {
         return None;
     }
 
-    // Parse micrograms: "250 microg", "250 µg", "250 mcg"
+    // Reject complex multi-dose formulations where the weight unit appears multiple times
+    // e.g., "500 mg dont 450 mg de diosmine et 50 mg de flavonoïdes"
+    // Count "mg" occurrences; >1 means compound dosage we can't reliably extract
+    if normalized.matches("mg").count() > 1 {
+        return None;
+    }
+
+    // --- PHASE 2: Extract FIRST number only ---
+    static FIRST_NUM_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:[,.]\d+)?)").unwrap());
+
+    let first_match = FIRST_NUM_RE.find(trimmed)?;
+    let first_number: f64 = first_match.as_str().replace(',', ".").parse().ok()?;
+
+    // --- PHASE 3: Unit detection and conversion ---
+
     if normalized.contains("micro") || normalized.contains("µg") || normalized.contains("mcg") {
-        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
-        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
-            return Some((val / 1000.0).to_string());
+        let result = first_number / 1000.0;
+        // Safety cap: no single-dose medication exceeds 10g (10000 mg)
+        if result > 10000.0 {
+            return None;
         }
-        return None;
+        return Some(result.to_string());
     }
 
-    // Parse milligrams: "1000 mg", "500mg" (check BEFORE g to catch "mg" first)
     if normalized.contains("mg") && !normalized.contains("microg") {
-        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
-        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
-            return Some(val.to_string());
+        let result = first_number;
+        if result > 10000.0 {
+            return None;
         }
-        return None;
+        return Some(result.to_string());
     }
 
-    // Parse grams: "1,00 g", "1 g"
     if normalized.contains('g') {
-        let num_part: String = normalized.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
-        if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
-            return Some((val * 1000.0).to_string());
+        let result = first_number * 1000.0;
+        if result > 10000.0 {
+            return None;
         }
+        return Some(result.to_string());
+    }
+
+    // --- PHASE 4: Fallback plain number ---
+    // Plain numbers without units — apply same safety cap
+    if first_number > 10000.0 {
         return None;
     }
-
-    // Fallback: try plain number
-    let num_part: String = trimmed.chars().filter(|c| c.is_ascii_digit() || *c == ',').collect();
-    if let Ok(val) = num_part.replace(',', ".").parse::<f64>() {
-        return Some(val.to_string());
-    }
-
-    None
+    Some(first_number.to_string())
 }
 
 fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
@@ -309,15 +383,15 @@ fn normalize_liens(f: &[String]) -> NormalizedRow {
 }
 
 fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
-    // 4 fields: cis, start_date (JJ/MM/AAAA), end_date (JJ/MM/AAAA), message + url (HTML)
+    // 4 fields: cis, start_date (YYYY-MM-DD ISO), end_date (YYYY-MM-DD ISO), message + url (HTML)
     // The message field contains embedded <a href="..."> links — strip HTML, keep text
     let raw_msg = strip_avis_html(&f[3]);
     NormalizedRow {
         table: "safety_alerts",
         values: vec![
             Some(f[0].clone()),                        // cis
-            parse_date_ddmmYYYY(&f[1]).ok(),           // start_date → ISO
-            parse_date_ddmmYYYY(&f[2]).ok(),           // end_date → ISO
+            parse_date_YYYYMMDD(&f[1].replace('-', "")).ok(), // start_date: "2021-09-29" → "20210929" → ISO
+            parse_date_YYYYMMDD(&f[2].replace('-', "")).ok(), // end_date: "2026-09-29" → "20260929" → ISO
             Some(raw_msg),                             // message_plain (HTML stripped)
             None,                                      // source_url (extracted at import time)
         ],
@@ -752,8 +826,8 @@ mod tests {
     fn test_normalize_info_importantes_basic() {
         let row = make_info_row([
             "60004971",
-            "01/01/2026",
-            "31/12/2026",
+            "2026-01-01",
+            "2026-12-31",
             "Alerte de sécurité importante https://ansm.gouv.fr/alarm/123",
         ]);
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
@@ -771,8 +845,8 @@ mod tests {
     fn test_normalize_info_importantes_html_in_message() {
         let row = make_info_row([
             "60004971",
-            "01/01/2026",
-            "31/12/2026",
+            "2026-01-01",
+            "2026-12-31",
             "<p>Alerte <b>importante</b><br>Nouvelle info</p>",
         ]);
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
@@ -785,7 +859,7 @@ mod tests {
     fn test_normalize_info_importantes_no_url() {
         let row = make_info_row([
             "60004971",
-            "01/01/2026",
+            "2026-01-01",
             "",
             "Message sans URL",
         ]);
@@ -799,8 +873,8 @@ mod tests {
     fn test_normalize_info_importantes_date_out_of_range() {
         let row = make_info_row([
             "60004971",
-            "01/01/2924", // far future
-            "31/12/2026",
+            "29240101", // far future
+            "2026-12-31",
             "Test",
         ]);
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_InfoImportantes, &row).unwrap();
@@ -864,6 +938,80 @@ mod tests {
     fn test_parse_dosage_mg_invalid() {
         assert_eq!(parse_dosage_mg("abc"), None);
         assert_eq!(parse_dosage_mg("no numbers here"), None);
+    }
+
+    // --- parse_dosage_mg: catastrophic parsing bugs (FIXED) ---
+
+    // Multi-dose concatenation: must use FIRST number only, not all concatenated
+    #[test]
+    fn test_parse_dosage_mg_multi_dose_rejection() {
+        // "500 mg dont 450 mg..." → extract only 500, not 500450
+        assert_eq!(parse_dosage_mg("500 mg dont 450 mg de diosmine et 50 mg de flavonoïdes"), None);
+        // Multi-dose in different contexts
+        assert_eq!(parse_dosage_mg("160 mg dans 800mg de poudre"), None);
+    }
+
+    // M.U.I. (dots break "ui" substring check)
+    #[test]
+    fn test_parse_dosage_mg_mui_bypass() {
+        assert_eq!(parse_dosage_mg("3 M.U.I."), None);
+        assert_eq!(parse_dosage_mg("1,5 M.U.I."), None);
+        assert_eq!(parse_dosage_mg("2500 U (2,5 mg)"), None);
+    }
+
+    // Cell counts: astronomical numbers should be rejected
+    #[test]
+    fn test_parse_dosage_mg_cell_counts() {
+        assert_eq!(parse_dosage_mg("400 000 000 à 2 000 000 000 de cellules"), None);
+    }
+
+    // "cell" word-boundary: must not reject "cellulaire" (French for "cellular")
+    #[test]
+    fn test_parse_dosage_mg_cell_not_cellulaire() {
+        // "cellulaire" alone should NOT trigger the cell-count rejection
+        // (CAR T-cell therapy compositions mention "dispersion cellulaire" but that string
+        // also triggers other rejections like "million" — tested separately)
+        // The key invariant: "cellulaire" does NOT contain standalone "cell" word
+        let s = "100 mg dispersion cellulaire";
+        // "cellulaire" contains "cell" but not as standalone word — should NOT be rejected by cell check
+        // However it also doesn't match "cellule", so the cell check passes.
+        // The function should extract the first number.
+        assert_eq!(parse_dosage_mg(s), Some("100".to_string()));
+    }
+
+    // Percentages: pure percentage ratios rejected, mg+% compounds accepted
+    #[test]
+    fn test_parse_dosage_mg_percentages() {
+        // Pure percentage → None
+        assert_eq!(parse_dosage_mg("50 % mole/mole"), None);
+        assert_eq!(parse_dosage_mg("0,025 %"), None);
+        // Percentage with gas pressure context → None (bar check)
+        assert_eq!(parse_dosage_mg("50 % mole/mole (sous une pression de 135 bar à 15 °C)"), None);
+        // mg with purity percentage → extract mg value
+        assert_eq!(parse_dosage_mg("700 mg (5 % m/m)"), Some("700".to_string()));
+        // "titré à" triggers range check (contains "à" + mg) → None (safe: equivalence notation)
+        assert_eq!(parse_dosage_mg("40 mg titré à 24 % d'hétérosides"), None);
+    }
+
+    // Gas pressure: bar context
+    #[test]
+    fn test_parse_dosage_mg_gas_pressure() {
+        assert_eq!(parse_dosage_mg("qsp (gaz sous 44 bar à 15°C)"), None);
+    }
+
+    // Equivalence with embedded range marker (contains "à")
+    #[test]
+    fn test_parse_dosage_mg_equivalence() {
+        assert_eq!(parse_dosage_mg("14,7 g équivalant à 100 mmol"), None);
+    }
+
+    // Safety cap: no single dose exceeds 10000 mg
+    #[test]
+    fn test_parse_dosage_mg_safety_cap() {
+        // Huge cell count would be 4e18 without cell rejection, but cell rejection handles it
+        // Test plain number exceeding safety cap
+        assert_eq!(parse_dosage_mg("20000 mg"), None); // > 10000
+        assert_eq!(parse_dosage_mg("11 g"), None); // 11000 mg > 10000
     }
 
     // --- strip_eu_slash edge cases ---

@@ -52,9 +52,7 @@ pub fn run_import(
                 file_name: file.filename().to_string(),
                 status: ImportStatus::Unchanged,
                 rows_imported: 0,
-                skipped_rows: 0,
                 bad_rows: 0,
-                warnings: 0,
                 duration_ms: start_file.elapsed().as_millis() as u64,
                 error: None,
             });
@@ -70,9 +68,7 @@ pub fn run_import(
                     file_name: file.filename().to_string(),
                     status: ImportStatus::Failed,
                     rows_imported: 0,
-                    skipped_rows: 0,
                     bad_rows: 0,
-                    warnings: 0,
                     duration_ms: start_file.elapsed().as_millis() as u64,
                     error: Some(e.to_string()),
                 });
@@ -105,8 +101,8 @@ pub fn run_import(
 
                 // Log to import_log
                 let _ = conn.execute(
-                    "INSERT INTO import_log (file_name, file_hash, file_size, row_count, status, bad_rows, skipped_rows, duration_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    "INSERT INTO import_log (file_name, file_hash, file_size, row_count, status, bad_rows, duration_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     rusqlite::params![
                         file.filename(),
                         hash,
@@ -114,7 +110,6 @@ pub fn run_import(
                         stats.rows_imported as i64,
                         "success",
                         stats.bad_rows as i64,
-                        stats.skipped_rows as i64,
                         duration as i64,
                     ],
                 );
@@ -123,9 +118,7 @@ pub fn run_import(
                     file_name: file.filename().to_string(),
                     status: ImportStatus::Success,
                     rows_imported: stats.rows_imported,
-                    skipped_rows: stats.skipped_rows,
                     bad_rows: stats.bad_rows,
-                    warnings: stats.warnings,
                     duration_ms: duration,
                     error: None,
                 });
@@ -135,9 +128,7 @@ pub fn run_import(
                     file_name: file.filename().to_string(),
                     status: ImportStatus::Failed,
                     rows_imported: 0,
-                    skipped_rows: 0,
                     bad_rows: 0,
-                    warnings: 0,
                     duration_ms: start_file.elapsed().as_millis() as u64,
                     error: Some(e.to_string()),
                 });
@@ -390,16 +381,13 @@ pub struct FileImportResult {
     pub file_name: String,
     pub status: ImportStatus,
     pub rows_imported: usize,
-    pub skipped_rows: usize,
     pub bad_rows: usize,
-    pub warnings: usize,
     pub duration_ms: u64,
     pub error: Option<String>,
 }
 
 pub enum ImportStatus {
     Success,
-    Partial,
     Failed,
     Unchanged,
 }
@@ -409,15 +397,14 @@ impl ImportReport {
         for r in &self.results {
             let status = match r.status {
                 ImportStatus::Success => "✓",
-                ImportStatus::Partial => "⚠",
                 ImportStatus::Failed => "✗",
                 ImportStatus::Unchanged => "=",
             };
             if let Some(e) = &r.error {
                 eprintln!("{} {}: {} — ERROR: {}", status, r.file_name, r.rows_imported, e);
             } else {
-                println!("{} {}: {} rows, {} bad, {} skipped ({}ms)",
-                    status, r.file_name, r.rows_imported, r.bad_rows, r.skipped_rows, r.duration_ms);
+                println!("{} {}: {} rows, {} bad ({}ms)",
+                    status, r.file_name, r.rows_imported, r.bad_rows, r.duration_ms);
             }
         }
         println!("\nTotal: {}ms", self.total_duration_ms);
@@ -655,7 +642,5 @@ mod insert_sql_tests {
 #[derive(Default)]
 struct ImportStats {
     rows_imported: usize,
-    skipped_rows: usize,
     bad_rows: usize,
-    warnings: usize,
 }

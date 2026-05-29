@@ -48,9 +48,6 @@ chrono = "0.4"
 # HTML stripping
 regex-lite = "0.1"
 
-# Versioned migrations
-rusqlite_migration = "1"
-
 # API server (Phase 2 only)
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

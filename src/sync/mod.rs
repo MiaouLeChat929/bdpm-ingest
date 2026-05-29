@@ -1,17 +1,10 @@
-//! Sync orchestrator — detects file changes and runs targeted imports.
-//!
-//! Public API:
-//! - `detect_changes()` — fetch + hash all files, return change plans (for dry-run)
-//! - `run_sync()` — full sync: detect changes, import only what changed (or all if full=true)
-//! - `run_dispo_sync()` — sync only the weekly availability file
+//! Change detection — fetch + hash all files, compare against stored state.
 
 use std::path::Path;
 
 use anyhow::Result;
-use rusqlite::Connection;
 
 use crate::download::{state::StateStore, BDPMFile, BDPM_URL, Fetcher};
-use crate::import::{run_import, ImportReport};
 
 /// Why a file is included in the sync plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,7 +35,7 @@ pub struct SyncPlan {
 /// Fetches and hashes every file, then compares against stored state.
 /// Returns a `SyncPlan` for each file that differs from the stored state.
 ///
-/// Use this for a dry-run / preview before calling `run_sync`.
+/// Use this for a dry-run / preview before running `import`.
 pub fn detect_changes(
     data_dir: &Path,
     state: &StateStore,
@@ -80,33 +73,4 @@ pub fn detect_changes(
     }
 
     Ok(plans)
-}
-
-/// Run full sync — import only changed files (unless `full` is true).
-///
-/// This is the main entry point used by the `Sync` CLI command.
-/// Internally delegates to `run_import` in the `import` module.
-///
-/// - `full: true` — force re-import of all files, ignore hash checks.
-/// - `file_filter: Some(name)` — import only the named file (e.g. `"CIS_CIP_Dispo_Spec.txt"`).
-/// - `file_filter: None` — import all files that have changed.
-pub fn run_sync(
-    conn: &mut Connection,
-    data_dir: &Path,
-    state: &mut StateStore,
-    full: bool,
-    file_filter: Option<&str>,
-) -> Result<ImportReport> {
-    run_import(conn, data_dir, state, full, file_filter)
-}
-
-/// Sync only the weekly availability file (CIS_CIP_Dispo_Spec).
-///
-/// Convenience wrapper — equivalent to `run_sync` with `file_filter = "CIS_CIP_Dispo_Spec.txt"`.
-pub fn run_dispo_sync(
-    conn: &mut Connection,
-    data_dir: &Path,
-    state: &mut StateStore,
-) -> Result<ImportReport> {
-    run_import(conn, data_dir, state, false, Some("CIS_CIP_Dispo_Spec.txt"))
 }

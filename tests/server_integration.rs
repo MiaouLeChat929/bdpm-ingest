@@ -23,17 +23,9 @@ fn create_test_db() -> PathBuf {
          PRAGMA synchronous=NORMAL;"
     ).expect("Failed to set PRAGMA");
 
-    // Run just the first migration (001_initial.sql) which creates all tables
-    let schema_001 = include_str!("../src/db/migrations/001_initial.sql");
-    conn.execute_batch(schema_001).expect("Failed to create tables from migration 001");
-
-    // Run migration 003 (remove mitm FK)
-    let schema_003 = include_str!("../src/db/migrations/003_remove_mitm_fk.sql");
-    conn.execute_batch(schema_003).expect("Failed to apply migration 003");
-
-    // Run migration 005 (safety_alerts)
-    let schema_005 = include_str!("../src/db/migrations/005_safety_alerts.sql");
-    conn.execute_batch(schema_005).expect("Failed to apply migration 005");
+    // Run consolidated schema (all tables, indexes, constraints)
+    let schema = include_str!("../src/db/schema.sql");
+    conn.execute_batch(schema).expect("Failed to create schema");
 
     // Create FTS5 virtual table for search (standalone, no content=)
     conn.execute_batch(r#"
@@ -196,9 +188,9 @@ fn create_test_db() -> PathBuf {
     ).expect("Failed to insert generic group 2");
 
     conn.execute(
-        "INSERT OR REPLACE INTO import_log (file_name, file_hash, file_size, row_count, status, bad_rows, skipped_rows, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        rusqlite::params!["test", "abc123", 100, 2, "success", 0, 0, 100]
+        "INSERT OR REPLACE INTO import_log (file_name, file_hash, file_size, row_count, status, bad_rows, duration_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params!["test", "abc123", 100, 2, "success", 0, 100]
     ).expect("Failed to insert import log");
 
     // Populate FTS from drugs with substance names from compositions
