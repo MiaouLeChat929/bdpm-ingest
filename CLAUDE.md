@@ -64,7 +64,7 @@ Key modules: download/ (fetch + state + listing), parse/ (TabParser, encoding de
              normalize/ (row transformers, dedup, price/date/HTML fields),
              import/ (orchestrator, bulk insert), db/ (SQLite + FTS5, consolidated schema.sql),
              api/ (axum HTTP server, search, drugs, ATC, availability),
-             cache/ (TTL cache), sync/ (change detection)
+             sync/ (change detection)
 ```
 
 ## Key Design Decisions

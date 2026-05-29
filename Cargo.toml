@@ -48,16 +48,11 @@ chrono = "0.4"
 # HTML stripping
 regex-lite = "0.1"
 
-# In-memory cache
-moka = { version = "0.12", features = ["sync"] }
-
-# API server (Phase 2 only)
+# API server
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
 
-# OpenAPI generation (Phase 2)
+# OpenAPI generation
 utoipa = "4"
 serde_yaml = "0.9"
 
@@ -70,6 +65,4 @@ hyper = "1"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio-test = "0.4"
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
 tempfile = "3"
