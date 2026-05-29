@@ -310,6 +310,21 @@ fn import_file(
             }
         }
 
+        // Post-import: populate drugs.atc_code from MITM data
+        if file == BDPMFile::CIS_MITM {
+            let updated = conn.execute(
+                "UPDATE drugs SET atc_code = (SELECT atc_code FROM mitm WHERE mitm.cis = drugs.cis)",
+                [],
+            ).unwrap_or(0);
+            tracing::info!("Populated atc_code for {} drugs from MITM data", updated);
+
+            let atc_codes_count = conn.execute(
+                "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
+                [],
+            ).unwrap_or(0);
+            tracing::info!("Inserted {} distinct ATC codes", atc_codes_count);
+        }
+
         Ok(stats)
     })();
 

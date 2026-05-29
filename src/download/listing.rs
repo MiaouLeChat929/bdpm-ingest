@@ -55,6 +55,14 @@ pub fn fetch_listing_dates(fetcher: &Fetcher) -> anyhow::Result<HashMap<String, 
         );
     }
 
+    if dates.len() < BDPMFile::all().len() {
+        tracing::warn!(
+            "Listing page returned only {}/{} expected files. HTML structure may have changed.",
+            dates.len(),
+            BDPMFile::all().len()
+        );
+    }
+
     Ok(dates)
 }
 
@@ -104,8 +112,13 @@ impl ListingDates {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(&path)?;
-        let dates: HashMap<String, String> = serde_json::from_str(&content)?;
-        Ok(Self { dates })
+        match serde_json::from_str::<HashMap<String, String>>(&content) {
+            Ok(dates) => Ok(Self { dates }),
+            Err(e) => {
+                tracing::warn!("Corrupt listing dates at {}: {}. Resetting.", path.display(), e);
+                Ok(Self::default())
+            }
+        }
     }
 
     pub fn save(&self, state_dir: &Path) -> anyhow::Result<()> {

@@ -22,6 +22,36 @@ pub fn decode_html_entities(raw: &str) -> String {
     result = result.replace("&reg;", "(R)");
     result = result.replace("&trade;", "(TM)");
 
+    // French accented named entities (present in BDPM HTML data)
+    result = result.replace("&eacute;", "é");
+    result = result.replace("&Eacute;", "É");
+    result = result.replace("&egrave;", "è");
+    result = result.replace("&Egrave;", "È");
+    result = result.replace("&ecirc;", "ê");
+    result = result.replace("&Ecirc;", "Ê");
+    result = result.replace("&euml;", "ë");
+    result = result.replace("&Euml;", "Ë");
+    result = result.replace("&agrave;", "à");
+    result = result.replace("&Agrave;", "À");
+    result = result.replace("&acirc;", "â");
+    result = result.replace("&Acirc;", "Â");
+    result = result.replace("&ccedil;", "ç");
+    result = result.replace("&Ccedil;", "Ç");
+    result = result.replace("&ocirc;", "ô");
+    result = result.replace("&Ocirc;", "Ô");
+    result = result.replace("&ouml;", "ö");
+    result = result.replace("&Ouml;", "Ö");
+    result = result.replace("&ucirc;", "û");
+    result = result.replace("&Ucirc;", "Û");
+    result = result.replace("&ugrave;", "ù");
+    result = result.replace("&Ugrave;", "Ù");
+    result = result.replace("&uuml;", "ü");
+    result = result.replace("&Uuml;", "Ü");
+    result = result.replace("&icirc;", "î");
+    result = result.replace("&Icirc;", "Î");
+    result = result.replace("&iuml;", "ï");
+    result = result.replace("&Iuml;", "Ï");
+
     // Numeric decimal entities (&#nnn;) — common accented chars for French content
     // French accented letters: é, è, ê, ë, ô, ö, û, ü, ù, ç
     decode_numeric_entities_in_place(&mut result);
@@ -153,6 +183,21 @@ mod tests {
         let input = "a<br><br><br>b";
         let expected = "a\n\nb";
         assert_eq!(strip_avis_html(input), expected);
+    }
+
+    #[test]
+    fn test_decode_french_named_entities() {
+        // Basic accented named entities
+        assert_eq!(decode_html_entities("&ecirc;"), "ê");
+        assert_eq!(decode_html_entities("&eacute;"), "é");
+        assert_eq!(decode_html_entities("&ccedil;"), "ç");
+        // Mixed case
+        assert_eq!(
+            decode_html_entities("fen&ecirc;tre fran&ccedil;aise"),
+            "fenêtre française"
+        );
+        // Uppercase
+        assert_eq!(decode_html_entities("&Eacute;cole"), "École");
     }
 
     #[test]

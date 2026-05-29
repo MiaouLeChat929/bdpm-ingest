@@ -30,13 +30,11 @@ pub fn create_fts_tables(conn: &Connection) -> Result<(), rusqlite::Error> {
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_ad AFTER DELETE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, cis, name_raw, name, atc_code, form, lab_name, substance_name)
-            VALUES ('delete', old.cis, old.name_raw, old.name, old.atc_code, old.form, old.lab_name, '');
+            DELETE FROM drugs_fts WHERE cis = old.cis;
         END;
 
         CREATE TRIGGER IF NOT EXISTS drugs_au AFTER UPDATE ON drugs BEGIN
-            INSERT INTO drugs_fts(drugs_fts, cis, name_raw, name, atc_code, form, lab_name, substance_name)
-            VALUES ('delete', old.cis, old.name_raw, old.name, old.atc_code, old.form, old.lab_name, '');
+            DELETE FROM drugs_fts WHERE cis = old.cis;
             INSERT INTO drugs_fts(cis, name_raw, name, atc_code, form, lab_name, substance_name)
             VALUES (new.cis, new.name_raw, new.name, new.atc_code, new.form, new.lab_name,
                     COALESCE((SELECT GROUP_CONCAT(substance_name, ' ') FROM compositions WHERE cis = new.cis), ''));

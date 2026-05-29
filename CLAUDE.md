@@ -79,7 +79,7 @@ Key modules: download/ (fetch + state + listing), parse/ (TabParser, encoding de
 
 **Orphan FKs** — SMR/ASMR/GENER/safety_alerts reference withdrawn drugs. The `is_orphan` flag is set post-import via UPDATE. `INSERT OR REPLACE` for drugs preserves references.
 
-**FTS5 standalone (no external content)** — FTS5 uses a standalone table (no `content='drugs'`). Triggers (`drugs_ai`, `drugs_ad`, `drugs_au`) handle all sync. Previous external-content approach broke because FTS5 column names (`name_clean`, `substance_name_clean`) didn't match `drugs` table columns. `rebuild_fts()` does DELETE+re-INSERT (not the `'rebuild'` command which requires content sync). FTS columns: `cis`, `name_raw`, `name`, `atc_code`, `form`, `lab_name`.
+**FTS5 standalone (no external content)** — FTS5 uses a standalone table (no `content='drugs'`). Triggers (`drugs_ai`, `drugs_ad`, `drugs_au`) handle all sync via explicit `DELETE FROM drugs_fts WHERE cis = old.cis` (not the broken `INSERT INTO drugs_fts(drugs_fts,...) VALUES ('delete',...)` which requires external content mode). `rebuild_fts()` does DELETE+re-INSERT (not the `'rebuild'` command which requires content sync). FTS columns: `cis`, `name_raw`, `name`, `atc_code`, `form`, `lab_name`.
 
 **Homeopathic drugs filtered at import** — Homeopathic drugs are excluded during normalization, not via post-import SQL.
 - Filter: `normalize_row()` returns `Option<NormalizedRow>` — `None` when CIS_bdpm `procedure_type` (field 5) contains "ENREG HOM" (case-insensitive)
@@ -98,6 +98,12 @@ Key modules: download/ (fetch + state + listing), parse/ (TabParser, encoding de
   WARNING: fields 9-11 are shifted: f[9]=eu_number, f[10]=lab_name, f[11]=is_patent (not sequential).
 
 **CIS_CIP_Dispo_Spec** — availability/stockout file, most frequently updated file (confirmed 19/05/2026). Polled via `bdpm-ingest poll` which parses embedded dates from the BDPM HTML listing page. The server provides no ETag, no Last-Modified, no Content-Length on TXT files.
+
+**ATC code data flow** — `drugs.atc_code` is populated from MITM data, not directly from the drugs file. Flow: `CIS_MITM.txt → mitm table (cis, atc_code) → UPDATE drugs SET atc_code` post-import. The `atc_codes` table is populated with distinct codes from `mitm`. FTS5 `atc_code` column gets populated via the drugs_ai trigger after the UPDATE.
+
+**HTML entity decoder coverage** — `decode_html_entities` handles: named entities (`&nbsp;`, `&amp;`, `&lt;`, `&gt;`, French accented: `&eacute;`, `&ecirc;`, `&ccedil;`, `&agrave;`, etc.), numeric decimal entities (`&#233;` → `é`), and curly quotes/apostrophes. French accented named entities are decoded before numeric entities. NOT supported: hex entities (`&#x1F4A5;`), less-common named entities beyond the ~30 French ones.
+
+**State management error handling** — Both `StateStore::load_or_create()` and `ListingDates::load()` use the same pattern: corrupt JSON → warn + reset to empty default. Do NOT introduce a third pattern. Both persist as pretty-printed JSON in the data directory.
 
 ## rusqlite Patterns (hard-won)
 
