@@ -1,13 +1,13 @@
-use axum::{extract::State, http::StatusCode, response::Json, Router, routing::get};
+use axum::{extract::State, response::Json, Router, routing::get};
 use serde::Serialize;
 use std::path::PathBuf;
-use tokio::task::spawn_blocking;
 
 pub mod atc;
 pub mod availability;
 pub mod drugs;
 pub mod groups;
 pub mod openapi;
+pub mod openapi_static;
 pub mod safety;
 pub mod search;
 
@@ -19,8 +19,19 @@ pub struct AppState {
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     status: &'static str,
-    last_import: Option<String>,
-    drug_count: i64,
+}
+
+/// Health check endpoint — static response, no DB queries.
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Service health", body = HealthResponse)
+    ),
+    tag = "bdpm-ingest"
+)]
+pub async fn health(_: State<AppState>) -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
 }
 
 pub fn build_app(db_path: PathBuf) -> Router {
@@ -58,46 +69,6 @@ pub async fn run_server(addr: &str, db_path: PathBuf) {
     let app = build_app(db_path);
     let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind address");
     axum::serve(listener, app).await.expect("Server error");
-}
-
-/// Health check endpoint
-#[utoipa::path(
-    get,
-    path = "/health",
-    responses(
-        (status = 200, description = "Service health", body = HealthResponse)
-    ),
-    tag = "bdpm-ingest"
-)]
-pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, StatusCode> {
-    let db_path = state.db_path.clone();
-
-    let result = spawn_blocking(move || {
-        let conn = crate::db::open_api_conn(&db_path)?;
-
-        let last_import = conn
-            .query_row(
-                "SELECT imported_at FROM import_log WHERE status = 'success' ORDER BY imported_at DESC LIMIT 1",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-
-        let drug_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM drugs", [], |row| row.get(0))
-            .unwrap_or(0);
-
-        Ok::<(Option<String>, i64), rusqlite::Error>((last_import, drug_count))
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(HealthResponse {
-        status: "ok",
-        last_import: result.0,
-        drug_count: result.1,
-    }))
 }
 
 #[cfg(test)]

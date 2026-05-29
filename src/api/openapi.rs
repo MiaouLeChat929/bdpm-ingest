@@ -40,9 +40,10 @@ pub async fn openapi_json() -> impl axum::response::IntoResponse {
     ([("content-type", "application/json")], json)
 }
 
-/// Serve the OpenAPI spec as YAML
+/// Serve the OpenAPI spec as YAML — static file, no serde_yaml needed.
+/// Regenerate with: cargo run -- dump-open-api > src/api/openapi.yaml
+const OPENAPI_YAML: &str = include_str!("openapi.yaml");
+
 pub async fn openapi_yaml() -> impl axum::response::IntoResponse {
-    // utoipa 4.x supports to_yaml via utoipa-gen
-    let yaml = serde_yaml::to_string(&ApiDoc::openapi()).unwrap_or_default();
-    ([("content-type", "application/x-yaml")], yaml)
+    ([("content-type", "application/x-yaml")], OPENAPI_YAML)
 }

@@ -83,7 +83,7 @@ impl StateStore {
             FileState {
                 content_hash: hash.to_string(),
                 size_bytes: size,
-                downloaded_at: chrono::Utc::now().to_rfc3339(),
+                downloaded_at: time::OffsetDateTime::now_utc().to_string(),
             },
         );
     }

@@ -39,11 +39,8 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Date/time (lighter than chrono)
-time = "0.3"
-
 # RFC3339 timestamps in state store
-chrono = "0.4"
+time = { version = "0.3", default-features = false, features = ["std", "formatting", "macros"] }
 
 # HTML stripping
 regex-lite = "0.1"
@@ -54,7 +51,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # OpenAPI generation
 utoipa = "4"
-serde_yaml = "0.9"
 
 [profile.release]
 opt-level = 3

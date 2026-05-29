@@ -1,10 +1,10 @@
 #![allow(dead_code, non_camel_case_types, non_snake_case)]
 
-use anyhow::Result;
-use clap::Parser;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
-use utoipa::OpenApi;
+
+use anyhow::Result;
+use clap::Parser;
 
 mod api;
 mod db;
@@ -111,9 +111,7 @@ fn main() -> Result<()> {
         }
 
         Command::DumpOpenApi => {
-            let yaml = serde_yaml::to_string(&api::openapi::ApiDoc::openapi())
-                .unwrap_or_else(|e| e.to_string());
-            println!("{}", yaml);
+            println!("{}", api::openapi_static::OPENAPI_YAML);
             return Ok(());
         }
 
