@@ -1,6 +1,6 @@
 # CLAUDE.md — bdpm-ingest
 
-Ingest pipeline for the French public drug database (BDPM). Downloads TSV files from ansm.sante.fr, normalizes into SQLite, exposes via HTTP API.
+Ingest pipeline for the French public drug database (BDPM). Downloads TSV files from base-donnees-publique.medicaments.gouv.fr, normalizes into SQLite, exposes via HTTP API.
 
 ## Philosophy
 
@@ -32,10 +32,12 @@ Single test: `cargo test test_name_here --lib`
 | `fetch` | Download all 10 BDPM files to `raw/` |
 | `ingest` | Full rebuild: drop/create DB, import from `raw/`, build FTS5 |
 | `serve --addr 127.0.0.1:8080` | HTTP API server (read-only) |
-| `poll` | Fetch listing page, print per-file dates, exit |
+| `poll [--prev file]` | Fetch listing page, print dates, diff against saved poll output |
 | `stats` | Row counts per table |
 | `logs [--limit N]` | Import history |
 | `dump-open-api` | Output OpenAPI YAML |
+
+**Regenerate OpenAPI spec** after changing endpoint schemas: `cargo run --release -- dump-open-api > src/api/openapi.yaml && git add src/api/openapi.yaml`
 
 **Always `ingest` — never `check` or `sync`.** No `--full` or `--file` flags. Import is always full.
 

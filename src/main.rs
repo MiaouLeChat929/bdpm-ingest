@@ -17,10 +17,11 @@ use crate::db::init_db;
 use crate::download::{Fetcher, fetch_listing_dates, diff_listing_dates, BDPM_URL};
 use crate::download::manifest::BDPMFile;
 use crate::import::run_ingest;
+use utoipa::OpenApi;
 
 #[derive(Parser)]
 #[command(name = "bdpm-ingest")]
-#[command(about = "BDMP drug database ingest pipeline")]
+#[command(about = "BDPM drug database ingest pipeline")]
 enum Command {
     /// Fetch all files from BDPM
     Fetch {
@@ -62,6 +63,40 @@ enum Command {
     DumpOpenApi,
 }
 
+// OpenAPI spec for dump-open-api command
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        api::search::search_drugs,
+        api::drugs::drug_detail,
+        api::groups::list_generic_groups,
+        api::groups::generic_group_detail,
+        api::atc::atc_top_level,
+        api::atc::atc_detail,
+        api::availability::availability,
+        api::health,
+        api::safety::drug_safety,
+    ),
+    components(schemas(
+        api::search::DrugSearchResult,
+        api::drugs::DrugDetail,
+        api::drugs::Presentation,
+        api::drugs::Composition,
+        api::groups::GenericGroupList,
+        api::groups::GenericGroupMember,
+        api::atc::AtcCode,
+        api::atc::AtcDetail,
+        api::availability::AvailabilityRow,
+        api::safety::SafetyResponse,
+        api::safety::SafetyAlert,
+        api::HealthResponse,
+    )),
+    tags(
+        (name = "bdpm-ingest", description = "BDPM Drug Database API")
+    )
+)]
+pub struct ApiDoc;
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("bdpm_ingest=info".parse()?))
@@ -81,7 +116,8 @@ fn main() -> Result<()> {
         }
 
         Command::DumpOpenApi => {
-            println!("{}", api::openapi::OPENAPI_YAML);
+            let yaml = ApiDoc::openapi().to_yaml().unwrap_or_default();
+            println!("{}", yaml);
             return Ok(());
         }
 

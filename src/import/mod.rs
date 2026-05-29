@@ -76,17 +76,34 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
             Ok(stats) => {
                 let duration = start_file.elapsed().as_millis() as u64;
 
-                // Inline atc_code population: runs immediately after MITM ingest,
-                // so drugs.atc_code is available when drugs table is imported next
+                // Inline atc_code population: runs immediately after MITM ingest.
+                // FTS5.atc_code can't be updated here (drugs not yet imported).
+                // CIS_bdpm block below handles both drugs.atc and FTS5.atc after drugs import.
                 if file.is_mitm() {
+                    // CIS_bdpm block (fired later) handles drugs.atc_code, FTS5.atc_code, and atc_codes
+                    tracing::debug!("MITM imported: {} rows", stats.rows_imported);
+                }
+
+                // Populate atc_code for drugs after CIS_bdpm import completes.
+                // MITM data is committed; drugs have NULL atc_code from CIS_bdpm import.
+                if file == BDPMFile::CIS_bdpm {
                     let updated = conn.execute(
                         "UPDATE drugs SET atc_code = (
                             SELECT atc_code FROM mitm WHERE mitm.cis = drugs.cis LIMIT 1
                         ) WHERE EXISTS (SELECT 1 FROM mitm WHERE mitm.cis = drugs.cis)",
                         [],
                     ).unwrap_or(0);
-                    tracing::info!("Populated atc_code for {} drugs from MITM", updated);
+                    tracing::info!("Populated atc_code for {} drugs after CIS_bdpm import", updated);
 
+                    let fts_synced = conn.execute(
+                        "UPDATE drugs_fts SET atc_code = (
+                            SELECT atc_code FROM drugs WHERE drugs.cis = drugs_fts.cis LIMIT 1
+                        ) WHERE EXISTS (SELECT 1 FROM drugs WHERE drugs.cis = drugs_fts.cis AND atc_code IS NOT NULL AND atc_code != '')",
+                        [],
+                    ).unwrap_or(0);
+                    tracing::info!("Synced atc_code to FTS5 for {} rows after CIS_bdpm", fts_synced);
+
+                    // Populate atc_codes lookup table from MITM (run here so atc_codes table is initialized)
                     conn.execute(
                         "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
                         [],

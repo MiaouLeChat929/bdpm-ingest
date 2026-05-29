@@ -47,7 +47,7 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # OpenAPI generation
-utoipa = "4"
+utoipa = { version = "4", features = ["yaml"] }
 
 [profile.release]
 opt-level = 3

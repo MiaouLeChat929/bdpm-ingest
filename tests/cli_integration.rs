@@ -24,8 +24,8 @@ fn test_cli_help() {
         "Command failed: stderr = {stderr}"
     );
     assert!(
-        stdout.contains("BDPM drug database"),
-        "Output missing 'BDPM drug database': {stdout}"
+        stdout.contains("BDMP drug database"),
+        "Output missing 'BDMP drug database': {stdout}"
     );
     assert!(
         stdout.contains("import"),

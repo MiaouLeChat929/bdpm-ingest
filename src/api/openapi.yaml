@@ -289,7 +289,7 @@ paths:
     get:
       tags:
       - bdpm-ingest
-      summary: Health check endpoint
+      summary: Health check endpoint — static response, no DB queries.
       operationId: health
       responses:
         '200':
