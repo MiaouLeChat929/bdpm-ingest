@@ -42,7 +42,8 @@ pub struct SafetyAlert {
     responses(
         (status = 200, description = "Safety alerts found", body = SafetyResponse),
         (status = 404, description = "CIS not found in database"),
-    )
+    ),
+    tag = "bdpm-ingest"
 )]
 pub async fn drug_safety(
     Path(cis): Path<String>,

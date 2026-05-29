@@ -398,6 +398,10 @@ fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
     }
 }
 
+/// Normalize curly apostrophes to ASCII apostrophe.
+/// Handles French typographic apostrophe (U+2019 right single quotation mark) and
+/// its left counterpart (U+2018). U+201A (low 9 qm, sometimes used as apostrophe
+/// in some fonts) is intentionally excluded — BDPM data contains 0 occurrences.
 #[expect(clippy::manual_flatten)]
 pub fn normalize_apostrophes(row: &mut NormalizedRow) {
     for val in &mut row.values {

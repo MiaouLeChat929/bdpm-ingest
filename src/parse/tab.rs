@@ -13,6 +13,8 @@ pub struct TabParser {
 
 impl TabParser {
     /// Open a BDPM file, decode with the correct encoding, return a streaming parser.
+    /// After decoding, validates encoding correctness by checking for UTF-8 replacement
+    /// characters (U+FFFD) which indicate wrong-charset decoding.
     pub fn from_path(path: &Path, file: BDPMFile) -> anyhow::Result<Self> {
         let mut bytes = std::fs::read(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
@@ -24,12 +26,26 @@ impl TabParser {
 
         let encoding = match file.schema().encoding {
             Encoding::Windows1252 => encoding_rs::WINDOWS_1252,
-            Encoding::Latin1 => encoding_rs::WINDOWS_1252, // ISO-8859-1 not in encoding_rs; practical difference only affects C1 controls which don't appear in BDPM
+            // ISO-8859-1 not in encoding_rs; practical difference only affects C1 controls
+            // (bytes 0x80-0x9F) which don't appear in BDPM data.
+            Encoding::Latin1 => encoding_rs::WINDOWS_1252,
             Encoding::Utf8 => encoding_rs::UTF_8,
         };
 
-        let (decoded, _, _) = encoding.decode(&bytes);
+        let (decoded, encoding_used, had_errors) = encoding.decode(&bytes);
         let content = decoded.into_owned().into_bytes();
+
+        // Validate: UTF-8 replacement chars (U+FFFD) indicate wrong charset.
+        // `had_errors` is true when bytes were invalid for the declared encoding
+        // (e.g., UTF-8 bytes decoded as Windows-1252, or vice versa).
+        if had_errors {
+            let file_name = file.filename();
+            let declared = format!("{:?}", file.schema().encoding);
+            tracing::warn!(
+                "Encoding anomaly in {}: declared={}, replacement_chars_detected",
+                file_name, declared
+            );
+        }
 
         let reader = BufReader::with_capacity(1 << 16, Cursor::new(content));
         Ok(Self {

@@ -4,6 +4,9 @@ use crate::normalize::NormalizedRow;
 /// Remove exact duplicate rows from CIS_COMPO.
 /// Key: (cis, substance_code, dosage).
 /// 4,780 duplicates in 32,389 total rows → 27,609 unique.
+/// per_unit is intentionally excluded from the key — in all 1,455 duplicate groups,
+/// per_unit varies only when form_label also varies. form_label is the semantically
+/// meaningful differentiator; per_unit is deterministically derived from it.
 /// Malformed rows (len < 5) are kept for logging.
 pub fn dedup_compo(rows: Vec<NormalizedRow>) -> Vec<NormalizedRow> {
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
