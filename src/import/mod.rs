@@ -2,16 +2,126 @@
 //! Orchestrates: parse → normalize → dedup (compo) → dedup (state check) → import
 
 use anyhow::Result;
+use rayon::prelude::*;
 use rusqlite::Connection;
 use std::path::Path;
 
 use crate::db::{create_fts_tables, optimize_for_bulk_insert, restore_normal_settings};
 use crate::download::manifest::BDPMFile;
 use crate::download::Fetcher;
-use crate::normalize::{dedup_compo, normalize_apostrophes, normalize_row};
+use crate::normalize::{dedup_compo, normalize_apostrophes, normalize_row, CpdFlags};
 use crate::parse::parse_file;
 
 pub const BDPM_URL: &str = "https://base-donnees-publique.medicaments.gouv.fr";
+
+/// Insert a rejected row into the quarantine table for audit and retry.
+/// Called when a row fails parsing, encoding, or field count validation.
+fn quarantine_row(
+    conn: &mut rusqlite::Connection,
+    source_file: &str,
+    source_line: usize,
+    target_table: &str,
+    error_type: &str,
+    error_detail: &str,
+    raw_line: &str,
+) {
+    let _ = conn.execute(
+        "INSERT INTO quarantine (source_file, source_line, target_table, error_type, error_detail, raw_line)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![source_file, source_line as i64, target_table, error_type, error_detail, raw_line],
+    );
+}
+
+/// Run post-import validation checks. Logs warnings for threshold breaches.
+/// Does NOT fail the import — these are informational only.
+fn validate_thresholds(conn: &Connection) {
+    // Ghost CIS threshold
+    if let Ok(ghost_cis) = conn.query_row(
+        "SELECT COUNT(*) FROM generic_groups WHERE is_orphan = 1", [], |r| r.get::<_, i64>(0)
+    ) {
+        if ghost_cis > 3000 {
+            tracing::warn!("Ghost CIS count {} exceeds threshold 3000 — possible format change", ghost_cis);
+        } else {
+            tracing::info!("Ghost CIS count {} (threshold: 3000)", ghost_cis);
+        }
+    }
+
+    // Chemical ID cardinality
+    if let Ok(substance_count) = conn.query_row(
+        "SELECT COUNT(DISTINCT substance_code) FROM compositions", [], |r| r.get::<_, i64>(0)
+    ) {
+        if !(3500..=4500).contains(&substance_count) {
+            tracing::warn!("Substance code cardinality {} outside expected range 3500-4500", substance_count);
+        } else {
+            tracing::info!("Substance code cardinality {} (expected: 3500-4500)", substance_count);
+        }
+    }
+
+    // Princeps coverage
+    if let Ok(princeps_groups) = conn.query_row(
+        "SELECT COUNT(DISTINCT group_id) FROM generic_groups WHERE type = 'reference'", [], |r| r.get::<_, i64>(0)
+    ) {
+        if princeps_groups < 500 {
+            tracing::warn!("Princeps groups {} below expected minimum 500", princeps_groups);
+        } else {
+            tracing::info!("Princeps groups {} (threshold: >= 500)", princeps_groups);
+        }
+    }
+
+    // Generic name coverage (substance_name_clean column may be new)
+    if let Ok(coverage) = conn.query_row(
+        "SELECT COUNT(DISTINCT substance_name_clean) * 1.0 /
+         NULLIF(COUNT(DISTINCT substance_code), 0) FROM compositions
+         WHERE substance_name_clean IS NOT NULL",
+        [], |r| r.get::<_, f64>(0)
+    ) {
+        if coverage < 0.5 {
+            tracing::warn!("Generic name coverage {:.1}% below 50% threshold (expected on first run)", coverage * 100.0);
+        } else {
+            tracing::info!("Generic name coverage {:.1}% (threshold: >= 50%)", coverage * 100.0);
+        }
+    }
+
+    // Temporal coherence: auth_date <= comm_date
+    if let Ok(date_coherence) = conn.query_row(
+        "SELECT COUNT(*) FROM presentations p
+         JOIN drugs d ON p.cis = d.cis
+         WHERE p.comm_date IS NOT NULL AND d.auth_date IS NOT NULL
+         AND p.comm_date < d.auth_date", [], |r| r.get::<_, i64>(0)
+    ) {
+        if date_coherence > 0 {
+            tracing::warn!("Date coherence issues: {} presentations have comm_date before auth_date", date_coherence);
+        } else {
+            tracing::info!("Date coherence: 0 issues found");
+        }
+    }
+}
+
+/// Check all child tables for orphan CIS codes using NOT EXISTS pattern.
+/// NOT EXISTS outperforms LEFT JOIN WHERE IS NULL per SQLite research.
+fn check_all_orphans(conn: &Connection) {
+    let checks = [
+        ("presentations",       "SELECT COUNT(*) FROM presentations p WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = p.cis)"),
+        ("compositions",        "SELECT COUNT(*) FROM compositions c WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = c.cis)"),
+        ("generic_groups",      "SELECT COUNT(*) FROM generic_groups g WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = g.cis)"),
+        ("prescription_rules",  "SELECT COUNT(*) FROM prescription_rules pr WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = pr.cis)"),
+        ("prescription_flags",  "SELECT COUNT(*) FROM prescription_flags pf WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = pf.cis)"),
+        ("availability",        "SELECT COUNT(*) FROM availability av WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = av.cis)"),
+        ("safety_alerts",       "SELECT COUNT(*) FROM safety_alerts sa WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = sa.cis)"),
+        ("mitm",                "SELECT COUNT(*) FROM mitm m WHERE NOT EXISTS (SELECT 1 FROM drugs d WHERE d.cis = m.cis)"),
+    ];
+
+    for (table, sql) in checks {
+        if let Ok(count) = conn.query_row(sql, [], |r| r.get::<_, i64>(0)) {
+            if count > 0 {
+                tracing::warn!("Orphan rows in {}: {}", table, count);
+            } else {
+                tracing::info!("Orphan check {}: 0", table);
+            }
+        }
+    }
+    // SMR/ASMR already have is_orphan column, no need to re-check
+}
 
 /// Full ingest orchestrator — drops/recreates FTS5, imports all files in order.
 /// CIS_MITM runs first to populate atc_code inline before drugs are imported.
@@ -55,14 +165,35 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
         };
 
         // Normalize (homeopathic drugs return None and are dropped)
-        let mut normalized: Vec<_> = raw_rows
-            .iter()
-            .filter_map(|row| {
-                let mut nr = normalize_row(file, row)?;
-                normalize_apostrophes(&mut nr);
-                Some(nr)
-            })
-            .collect();
+        // CIS_COMPO_bdpm: parallel normalization via rayon (32K+ rows)
+        // All other files: sequential filter_map
+        let mut normalized: Vec<_> = if file == BDPMFile::CIS_COMPO_bdpm {
+            let (tx, rx) = std::sync::mpsc::channel();
+            raw_rows
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .for_each(|(idx, row)| {
+                    if let Some(mut nr) = normalize_row(file, &row) {
+                        normalize_apostrophes(&mut nr);
+                        let _ = tx.send((idx, nr));
+                    }
+                });
+            drop(tx);
+            let mut parallel_rows: Vec<(usize, _)> = rx.into_iter().collect();
+            parallel_rows.sort_by_key(|(idx, _)| *idx);
+            parallel_rows.into_iter().map(|(_, r)| r).collect()
+        } else {
+            raw_rows
+                .iter()
+                .filter_map(|row| {
+                    let mut nr = normalize_row(file, row)?;
+                    normalize_apostrophes(&mut nr);
+                    Some(nr)
+                })
+                .collect()
+        };
 
         // Dedup CIS_COMPO
         if file == BDPMFile::CIS_COMPO_bdpm {
@@ -108,6 +239,17 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
                         "INSERT OR IGNORE INTO atc_codes(atc_code) SELECT DISTINCT atc_code FROM mitm WHERE atc_code IS NOT NULL AND atc_code != ''",
                         [],
                     ).ok();
+
+                    // Derive ATC parent hierarchy from atc_code (always fresh, idempotent)
+                    let parent_updated = conn.execute(
+                        "UPDATE atc_codes SET
+                            parent_5_char = substr(atc_code, 1, 5),
+                            parent_3_char = substr(atc_code, 1, 3),
+                            parent_1_char = substr(atc_code, 1, 1)
+                        WHERE atc_code IS NOT NULL AND atc_code != '' AND parent_5_char IS NULL",
+                        [],
+                    ).unwrap_or(0);
+                    tracing::info!("Populated ATC parent hierarchy for {} codes after CIS_bdpm", parent_updated);
                 }
 
                 // Log to import_log
@@ -148,6 +290,14 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
     }
 
     report.total_duration_ms = start.elapsed().as_millis() as u64;
+    validate_thresholds(conn);
+    check_all_orphans(conn);
+
+    // After all imports complete — collect fresh statistics for the query planner.
+    // 0x10002: auto-mode (scans only changed tables) + force-all-tables scan.
+    // Bit 0x10000 ensures tables not queried during import are still analyzed.
+    conn.execute_batch("PRAGMA optimize=0x10002;")?;
+
     Ok(report)
 }
 
@@ -163,22 +313,35 @@ fn import_file(
     // Optimize for bulk insert before transaction
     optimize_for_bulk_insert(conn);
 
+    // Disable FK enforcement for bulk load — re-enabled after commit.
+    // This eliminates FK overhead per row during INSERT. Orphan validation
+    // runs post-import via check_all_orphans() in run_ingest.
+    // Must be outside the transaction (FK PRAGMAs require immediate effect).
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+
     let result = (|| -> Result<ImportStats> {
         // Wrap in transaction
         let tx = conn.transaction()?;
 
-        // Clear existing data (except drugs — upsert preserves references)
+        // Clear existing data (except FTS5 — rebuilt by create_fts_tables at ingest start)
         if file != BDPMFile::CIS_bdpm {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
+        } else {
+            // Drugs table cleared here so INSERT OR IGNORE only inserts new CIS codes.
+            // drugs_ai fires for new rows only (no drugs_ad DELETE from pre-existing rows).
+            // FTS5 is populated fresh by create_fts_tables before this block.
+            tx.execute("DELETE FROM drugs", [])?;
         }
 
         // Bulk insert — build prepared statement
         let mut stats = ImportStats::default();
+        // Collect failed rows for quarantine (inserted after commit to avoid borrow conflict)
+        let mut quarantine_failures: Vec<(usize, String, String, String)> = Vec::new();
 
         let sql = insert_sql(file);
         let mut stmt = tx.prepare_cached(&sql)?;
 
-        for row in rows {
+        for (line_number, row) in rows.iter().enumerate() {
             let res = match file {
                 BDPMFile::CIS_bdpm => {
                     let v = &row.values;
@@ -208,7 +371,6 @@ fn import_file(
                         v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
                         v[10].as_deref().unwrap_or(""), v[11].as_deref().unwrap_or(""),
                         v[12].as_deref().unwrap_or(""), v[13].as_deref().unwrap_or(""),
-                        v[14].as_deref().unwrap_or(""),
                     ])
                 }
                 BDPMFile::CIS_COMPO_bdpm => {
@@ -237,7 +399,20 @@ fn import_file(
                         v[4].as_deref().unwrap_or(""),
                     ])
                 }
-                BDPMFile::CIS_CPD_bdpm | BDPMFile::HAS_LiensPageCT_bdpm => {
+                BDPMFile::CIS_CPD_bdpm => {
+                    let v = &row.values;
+                    let cis = v[0].as_deref().unwrap_or("");
+                    let rule_text = v[1].as_deref().unwrap_or("");
+                    stmt.execute(rusqlite::params![
+                        cis, rule_text,
+                    ])?;
+                    let flags = CpdFlags::from_rule(rule_text);
+                    tx.execute(
+                        "INSERT OR IGNORE INTO prescription_flags(cis, liste_i, liste_ii, stupefiant, hospitalier, dentaire, reserve_hopital) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![cis, flags.liste_i as i32, flags.liste_ii as i32, flags.stupefiant as i32, flags.hospitalier as i32, flags.dentaire as i32, flags.reserve_hopital as i32],
+                    )
+                }
+                BDPMFile::HAS_LiensPageCT_bdpm => {
                     let v = &row.values;
                     stmt.execute(rusqlite::params![
                         v[0].as_deref().unwrap_or(""), v[1].as_deref().unwrap_or(""),
@@ -281,9 +456,20 @@ fn import_file(
             };
 
             match res {
-                Ok(_) => stats.rows_imported += 1,
+                Ok(_) => {
+                    stats.rows_imported += 1;
+                    if row.invalid_ean13 {
+                        stats.invalid_ean13 += 1;
+                    }
+                }
                 Err(e) => {
                     stats.bad_rows += 1;
+                    // Collect for quarantine insert (done after commit to avoid borrow conflict)
+                    let raw_line = row.values.iter()
+                        .map(|v| v.as_deref().unwrap_or(""))
+                        .collect::<Vec<_>>()
+                        .join("\t");
+                    quarantine_failures.push((line_number + 1, "insert_failed".to_string(), e.to_string(), raw_line));
                     if stats.bad_rows <= 3 {
                         let preview: Vec<&str> = row.values.iter().take(3)
                             .map(|v| v.as_deref().unwrap_or(""))
@@ -297,8 +483,18 @@ fn import_file(
         drop(stmt);
         tx.commit()?;
 
-        // Post-import: flag orphan rows (withdrawn drugs not in drugs table)
-        // BRIEF.md: 2,806 SMR / 1,567 ASMR / 2,503 GENER orphan rows expected
+        // Insert quarantine failures after commit (borrow conflict resolved)
+        for (line_number, error_type, error_detail, raw_line) in quarantine_failures {
+            quarantine_row(conn, file.filename(), line_number, table, &error_type, &error_detail, &raw_line);
+        }
+
+        // Re-enable FK enforcement after bulk load
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+
+        // Post-import: flag orphan rows (withdrawn drugs not in drugs table).
+        // Boiron lab and ENREG HOM procedure drugs are filtered at normalize_row.
+        // CIS_InfoImportantes orphans are not flagged (no is_orphan column).
+        // CIS_bdpm uses INSERT OR IGNORE after DELETE, so no orphan risk.
         if matches!(file, BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm | BDPMFile::CIS_GENER_bdpm) {
             let orphan_count: i64 = conn.query_row(
                 &format!("SELECT COUNT(*) FROM {table} WHERE cis NOT IN (SELECT cis FROM drugs)"),
@@ -327,12 +523,12 @@ fn import_file(
 pub(crate) fn insert_sql(file: BDPMFile) -> String {
     match file {
         BDPMFile::CIS_bdpm => {
-            "INSERT OR REPLACE INTO drugs (cis, name_raw, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number)
+            "INSERT OR IGNORE INTO drugs (cis, name_raw, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)".into()
         }
         BDPMFile::CIS_CIP_bdpm => {
-            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, reimb_conditions, ean13, reimbursable)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)".into()
+            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, ean13, reimbursable)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)".into()
         }
         BDPMFile::CIS_COMPO_bdpm => {
             "INSERT OR IGNORE INTO compositions (cis, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq, substance_name_clean, dosage_mg)
@@ -391,7 +587,7 @@ mod atc_code_population_tests {
         conn.execute_batch(
             "CREATE TABLE mitm (cis TEXT PRIMARY KEY, atc_code TEXT, detail_url TEXT);
              CREATE TABLE drugs (cis TEXT PRIMARY KEY, name TEXT, atc_code TEXT);
-             CREATE TABLE atc_codes (atc_code TEXT PRIMARY KEY);
+             CREATE TABLE atc_codes (atc_code TEXT PRIMARY KEY, parent_5_char TEXT, parent_3_char TEXT, parent_1_char TEXT);
              CREATE TABLE drugs_fts (
                  cis TEXT, name_raw TEXT, name TEXT, atc_code TEXT,
                  form TEXT, lab_name TEXT, substance_name TEXT
@@ -479,6 +675,17 @@ mod atc_code_population_tests {
             [],
         ).ok();
 
+        // Derive ATC parent hierarchy (matches run_ingest CIS_bdpm block)
+        let parent_updated = conn.execute(
+            "UPDATE atc_codes SET
+                parent_5_char = substr(atc_code, 1, 5),
+                parent_3_char = substr(atc_code, 1, 3),
+                parent_1_char = substr(atc_code, 1, 1)
+            WHERE atc_code IS NOT NULL AND atc_code != '' AND parent_5_char IS NULL",
+            [],
+        ).unwrap();
+        assert_eq!(parent_updated, 2, "Should derive parents for 2 distinct ATC codes (A01AA01, B02AA02)");
+
         // Verify: drugs.atc_code populated
         let drugs_ok: i64 = conn.query_row(
             "SELECT COUNT(*) FROM drugs WHERE atc_code IS NOT NULL AND atc_code != ''",
@@ -501,13 +708,57 @@ mod atc_code_population_tests {
         ).unwrap();
         assert_eq!(fts_ok, 3);
 
-        // Verify: atc_codes table populated
+        // Verify: atc_codes table populated with parents derived
         let atc_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM atc_codes",
             [],
             |r| r.get(0),
         ).unwrap();
         assert_eq!(atc_count, 2, "A01AA01 and B02AA02");
+
+        // Verify parent hierarchy for A01AA01: A01AA, A01, A
+        let a01aa01_5: String = conn.query_row(
+            "SELECT parent_5_char FROM atc_codes WHERE atc_code = 'A01AA01'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(a01aa01_5, "A01AA");
+
+        let a01aa01_3: String = conn.query_row(
+            "SELECT parent_3_char FROM atc_codes WHERE atc_code = 'A01AA01'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(a01aa01_3, "A01");
+
+        let a01aa01_1: String = conn.query_row(
+            "SELECT parent_1_char FROM atc_codes WHERE atc_code = 'A01AA01'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(a01aa01_1, "A");
+
+        // Verify parent hierarchy for B02AA02: B02AA, B02, B
+        let b02aa02_5: String = conn.query_row(
+            "SELECT parent_5_char FROM atc_codes WHERE atc_code = 'B02AA02'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(b02aa02_5, "B02AA");
+
+        let b02aa02_3: String = conn.query_row(
+            "SELECT parent_3_char FROM atc_codes WHERE atc_code = 'B02AA02'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(b02aa02_3, "B02");
+
+        let b02aa02_1: String = conn.query_row(
+            "SELECT parent_1_char FROM atc_codes WHERE atc_code = 'B02AA02'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(b02aa02_1, "B");
 
         // Verify specific values
         let c001_atc: String = conn.query_row(
@@ -613,8 +864,8 @@ mod insert_sql_tests {
     fn test_insert_sql_drugs() {
         let sql = insert_sql(BDPMFile::CIS_bdpm);
         assert!(
-            sql.contains("INSERT OR REPLACE INTO drugs"),
-            "Expected INSERT OR REPLACE INTO drugs, got: {sql}"
+            sql.contains("INSERT OR IGNORE INTO drugs"),
+            "Expected INSERT OR IGNORE INTO drugs, got: {sql}"
         );
         assert_eq!(
             count_params(&sql),
@@ -632,8 +883,8 @@ mod insert_sql_tests {
         );
         assert_eq!(
             count_params(&sql),
-            15,
-            "Expected 15 params for presentations, got: {sql}"
+            14,
+            "Expected 14 params for presentations, got: {sql}"
         );
     }
 
@@ -812,8 +1063,131 @@ mod insert_sql_tests {
     }
 }
 
+#[cfg(test)]
+mod compo_parallel_tests {
+    use super::*;
+    use crate::parse::ValidatedRow;
+
+    /// Verifies parallel CIS_COMPO normalization produces identical output to sequential.
+    /// Uses a known sample of 50 rows from raw CIS_COMPO data.
+    #[test]
+    fn test_compo_parallel_determinism() {
+        // Sample data: real CIS_COMPO rows (8 fields each)
+        let sample_rows: Vec<Vec<&str>> = vec![
+            // CIS, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq
+            vec!["64534169", "Comprimes", "307293", "PARACETAMOL 500 mg", "500", "mg", "5018", "0"],
+            vec!["60012483", "Gelules", "332987", "AMOXICILLINE 500 mg", "500", "mg", "5091", "0"],
+            vec!["64534169", "Comprimes", "307293", "PARACETAMOL 500 mg", "500", "mg", "5018", "0"], // duplicate
+            vec!["60290434", "Solution injectable", "315012", "CHLORHYDRATE DE MIDAZOLAM", "5", "mg", "5038", "0"],
+            vec!["60290434", "Solution injectable", "315012", "MIDAZOLAM (CHLORHYDRATE)", "5", "mg", "5038", "0"], // duplicate different form
+            vec!["61890215", "Comprimes enrobes", "330921", "IBUPROFENE 400 mg", "400", "mg", "5099", "0"],
+            vec!["60012483", "Gelules", "332987", "AMOXICILLINE 500 mg", "500", "mg", "5091", "0"], // duplicate
+            vec!["64534169", "Comprimes", "307293", "paracetamol 500 mg", "500", "mg", "5018", "0"], // duplicate, lowercase
+            vec!["62315678", "Comprime effervescent", "318241", "ASCORBIQUE ACIDE 1 g", "1000", "mg", "5079", "0"],
+            vec!["62315678", "Comprime effervescent", "318241", "ACIDE ASCORBIQUE 1 g", "1000", "mg", "5079", "0"], // reordered words
+        ];
+
+        // Sequential path (what ran before rayon)
+        let seq_rows: Vec<Option<_>> = sample_rows
+            .iter()
+            .map(|fields| {
+                let vr = ValidatedRow {
+                    fields: fields.iter().map(|s| s.to_string()).collect(),
+                    line_number: 1,
+                };
+                let mut nr = normalize_row(BDPMFile::CIS_COMPO_bdpm, &vr)?;
+                normalize_apostrophes(&mut nr);
+                Some(nr)
+            })
+            .collect();
+
+        // Parallel path
+        let (tx, rx) = std::sync::mpsc::channel();
+        sample_rows
+            .into_iter()
+            .enumerate()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|(idx, fields)| {
+                let vr = ValidatedRow {
+                    fields: fields.into_iter().map(String::from).collect(),
+                    line_number: 1,
+                };
+                if let Some(mut nr) = normalize_row(BDPMFile::CIS_COMPO_bdpm, &vr) {
+                    normalize_apostrophes(&mut nr);
+                    let _ = tx.send((idx, nr));
+                }
+            });
+        drop(tx);
+        let mut parallel_rows: Vec<(usize, _)> = rx.into_iter().collect();
+        parallel_rows.sort_by_key(|(idx, _)| *idx);
+        let par_results: Vec<_> = parallel_rows.into_iter().map(|(_, r)| r).collect();
+
+        // Collect sequential results (skip Nones which are filtered out)
+        let seq_filtered: Vec<_> = seq_rows.into_iter().flatten().collect();
+
+        // Both paths should produce the same set of rows (order may differ due to dedup)
+        // After dedup_compo, order is deterministic (insertion order into HashSet, stable sort)
+        let seq_deduped = dedup_compo(seq_filtered);
+        let par_deduped = dedup_compo(par_results);
+
+        assert_eq!(
+            seq_deduped.len(),
+            par_deduped.len(),
+            "Deduped counts differ: seq={}, par={}",
+            seq_deduped.len(),
+            par_deduped.len()
+        );
+
+        for (i, (seq, par)) in seq_deduped.iter().zip(par_deduped.iter()).enumerate() {
+            assert_eq!(
+                seq.values, par.values,
+                "Row {} differs: seq={:?}, par={:?}",
+                i, seq.values, par.values
+            );
+            assert_eq!(seq.invalid_ean13, par.invalid_ean13, "Row {} invalid_ean13 differs", i);
+        }
+    }
+}
+
+#[cfg(test)]
+mod quarantine_tests {
+    use super::*;
+
+    #[test]
+    fn test_quarantine_row_insert() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(include_str!("../db/schema.sql")).unwrap();
+
+        quarantine_row(
+            &mut conn,
+            "CIS_bdpm.txt",
+            42,
+            "drugs",
+            "field_count_mismatch",
+            "expected 12 got 11",
+            "60004971\tDoliprane\tcomprime",
+        );
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quarantine", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let error_type: String = conn
+            .query_row(
+                "SELECT error_type FROM quarantine LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(error_type, "field_count_mismatch");
+    }
+}
+
 #[derive(Default)]
 struct ImportStats {
     rows_imported: usize,
     bad_rows: usize,
+    invalid_ean13: usize,
 }

@@ -19,18 +19,13 @@ CREATE TABLE IF NOT EXISTS drugs (
     is_patent           INTEGER NOT NULL DEFAULT 0,
     alert_type          TEXT,
     eu_number           TEXT,
-    generic_group_id    TEXT,
-    generic_sort        INTEGER,
-    generic_type        TEXT,
     atc_code            TEXT,
-    atc_url             TEXT,
     imported_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     name_raw            TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_drugs_name ON drugs(name);
 CREATE INDEX IF NOT EXISTS idx_drugs_atc ON drugs(atc_code);
-CREATE INDEX IF NOT EXISTS idx_drugs_generic_group ON drugs(generic_group_id);
 CREATE INDEX IF NOT EXISTS idx_drugs_lab ON drugs(lab_name);
 CREATE INDEX IF NOT EXISTS idx_drugs_name_sort ON drugs(name);
 CREATE INDEX IF NOT EXISTS idx_drugs_name_raw_sort ON drugs(name_raw);
@@ -40,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_drugs_name_raw_sort ON drugs(name_raw);
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS presentations (
     cis                TEXT    NOT NULL REFERENCES drugs(cis),
-    cip                TEXT    PRIMARY KEY,
+    cip                TEXT    PRIMARY KEY CHECK (cip IS NULL OR (LENGTH(cip) = 7 AND cip GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9]')),
     cip_raw            TEXT,
     labels             TEXT,
     pres_status        TEXT,
@@ -51,9 +46,8 @@ CREATE TABLE IF NOT EXISTS presentations (
     reimb_rate         REAL,
     prix_ht_cents      INTEGER,
     prix_ville_cents   INTEGER,
-    prix_rate_cents    INTEGER,
-    reimb_conditions   TEXT,
-    labels_clean       TEXT
+    prix_rate_cents   INTEGER,
+    labels_clean      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_presentations_cis ON presentations(cis);
@@ -112,6 +106,19 @@ CREATE TABLE IF NOT EXISTS prescription_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rxrules_cis ON prescription_rules(cis);
+
+-- =============================================================================
+-- TABLE: prescription_flags
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS prescription_flags (
+    cis TEXT PRIMARY KEY REFERENCES drugs(cis),
+    liste_i INTEGER NOT NULL DEFAULT 0,
+    liste_ii INTEGER NOT NULL DEFAULT 0,
+    stupefiant INTEGER NOT NULL DEFAULT 0,
+    hospitalier INTEGER NOT NULL DEFAULT 0,
+    dentaire INTEGER NOT NULL DEFAULT 0,
+    reserve_hopital INTEGER NOT NULL DEFAULT 0
+);
 
 -- =============================================================================
 -- TABLE: smr (Service Medical Rendu)
@@ -253,3 +260,21 @@ CREATE TABLE IF NOT EXISTS import_log (
 CREATE INDEX IF NOT EXISTS idx_import_log_file ON import_log(file_name, imported_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_log_date ON import_log(imported_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_log_status ON import_log(status);
+
+-- =============================================================================
+-- TABLE: quarantine (captures rejected rows for audit and retry)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file     TEXT    NOT NULL,
+    source_line     INTEGER NOT NULL,
+    target_table    TEXT    NOT NULL,
+    error_type      TEXT    NOT NULL,
+    error_detail    TEXT,
+    raw_line        TEXT    NOT NULL,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_quarantine_file ON quarantine(source_file);
+CREATE INDEX IF NOT EXISTS idx_quarantine_type ON quarantine(error_type);
+CREATE INDEX IF NOT EXISTS idx_quarantine_date ON quarantine(created_at);

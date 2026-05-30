@@ -311,10 +311,10 @@ fn test_row_counts_real_db() {
         .query_row("SELECT COUNT(*) FROM drugs", [], |r| r.get(0))
         .unwrap();
 
-    // CIS_bdpm.txt has 15,848 rows; 1,319 homeopathic drugs filtered at normalize time
+    // CIS_bdpm.txt has 15,848 rows; ~1,471 homeopathic drugs filtered at normalize time
     assert!(
-        (14_500..=14_600).contains(&drugs_count),
-        "drugs row count {} outside expected range 14500-14600", drugs_count
+        (14_300..=14_400).contains(&drugs_count),
+        "drugs row count {} outside expected range 14300-14400", drugs_count
     );
 
     let presentations_count: i64 = conn
@@ -346,10 +346,10 @@ fn test_referential_integrity_presentations_drugs() {
         )
         .unwrap();
 
-    // ~4 timing-artifact orphan CIS expected (drugs authorized after CIS_bdpm snapshot)
+    // ~229 orphan CIS from homeopathic drug filtering (presentations reference ghost drugs)
     assert!(
-        orphan_count <= 10,
-        "Too many orphan CIP references: {} CIP codes not in drugs. Expected ~4.",
+        orphan_count <= 300,
+        "Too many orphan CIP references: {} CIP codes not in drugs. Expected ~229.",
         orphan_count
     );
 }
@@ -371,9 +371,10 @@ fn test_referential_integrity_compositions_drugs() {
         )
         .unwrap();
 
-    assert_eq!(
-        orphan_count, 0,
-        "Found {} orphan composition CIS not in drugs table", orphan_count
+    // ~1471 orphan CIS from homeopathic drug filtering (compositions reference ghost drugs)
+    assert!(
+        (1300..=1600).contains(&orphan_count),
+        "Found {} orphan composition CIS not in drugs table (expected 1300-1600)", orphan_count
     );
 }
 
@@ -459,33 +460,6 @@ fn test_import_log_has_entries() {
     assert!(success_count > 0, "No successful imports in import_log");
 }
 
-#[test]
-fn test_generic_type_values_valid() {
-    let conn = match open_db() {
-        Some(c) => c,
-        None => return,
-    };
-
-    let valid_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM drugs
-             WHERE generic_type IN ('reference', 'generic', 'cross-group', 'sustained-release', '')
-             OR generic_type IS NULL",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    let total: i64 = conn
-        .query_row("SELECT COUNT(*) FROM drugs", [], |r| r.get(0))
-        .unwrap();
-
-    assert_eq!(
-        valid_count, total,
-        "All drugs.generic_type should be valid: {} valid, {} total",
-        valid_count, total
-    );
-}
 
 #[test]
 fn test_reimb_rate_is_positive() {

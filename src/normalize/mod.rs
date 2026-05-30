@@ -3,15 +3,33 @@ pub mod date;
 pub mod fields;
 pub mod html;
 pub mod dedup;
+pub mod cpd;
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 use regex_lite::Regex;
 
 pub use price::parse_price_cents;
 pub use date::{parse_date_ddmmYYYY, parse_date_YYYYMMDD};
-pub use fields::{strip_field, normalize_generic_type, normalize_spaces};
+#[expect(unused_imports)]
+pub use fields::{strip_field, normalize_generic_type, normalize_spaces, strip_diacritics, validate_ean13, strip_salt, strip_parens, fts_normalize};
 pub use html::strip_avis_html;
 pub use dedup::dedup_compo;
+pub use cpd::CpdFlags;
+
+/// Static set of lab names known to manufacture homeopathic products.
+/// Used to filter homeopathic drugs at import (Layer 1 of four-layer detection).
+static HOMEOPATHY_LABS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    ["BOIRON", "LEHNING", "WELEDA", "PERRIGO", "HERBALGEM"]
+        .into_iter()
+        .collect()
+});
+
+/// Regex to detect homeopathic dilution patterns in drug names.
+/// Matches: 4CH, 30 DH, 5K, 15LM, etc.
+static DILUTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b\d+\s*(?:CH|DH|K|LM)\b").unwrap()
+});
 
 /// Normalize a row from a BDPMFile based on field type.
 /// Returns `None` for homeopathic drugs (procedure_type contains "ENREG HOM").
@@ -20,8 +38,30 @@ pub fn normalize_row(file: crate::download::manifest::BDPMFile, row: &crate::par
     let f = &row.fields;
     match file {
         crate::download::manifest::BDPMFile::CIS_bdpm => {
-            // Filter homeopathic drugs at the source
-            if f.get(5).map(|s| s.to_uppercase().contains("ENREG HOM")).unwrap_or(false) {
+            // Filter homeopathic drugs at the source using four-layer detection:
+            //
+            // Layer 1: Lab name check — known homeopathy labs (BOIRON, LEHNING, WELEDA, etc.)
+            let lab_upper = f.get(10).map(|s| s.to_uppercase().trim().to_string()).unwrap_or_default();
+            if HOMEOPATHY_LABS.contains(lab_upper.as_str()) {
+                return None;
+            }
+            //
+            // Layer 2: Keyword detection — "HOMEOPATHI" or "DILUTION" in name + form
+            let name_upper = f.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
+            let form_upper = f.get(2).map(|s| s.to_uppercase()).unwrap_or_default();
+            let combined = format!("{} {}", name_upper, form_upper);
+            if combined.contains("HOMEOPATHI") || combined.contains("DILUTION") {
+                return None;
+            }
+            //
+            // Layer 3: Procedure type — "ENREG HOM" or "ENREGISTREMENT HOMEOPATHIQUE"
+            let proc = f.get(5).map(|s| s.to_uppercase()).unwrap_or_default();
+            if proc.contains("ENREG HOM") || proc.contains("ENREGISTREMENT HOMEOPATHIQUE") {
+                return None;
+            }
+            //
+            // Layer 4: Dilution pattern in name (e.g., "ARNICA 4CH", "30K dilution")
+            if DILUTION_RE.is_match(&name_upper) {
                 return None;
             }
             Some(normalize_cis_bdpm(f))
@@ -43,29 +83,35 @@ pub fn normalize_row(file: crate::download::manifest::BDPMFile, row: &crate::par
 pub struct NormalizedRow {
     pub table: &'static str,
     pub values: Vec<Option<String>>,
+    /// Set true when the ean13 field failed checksum validation.
+    /// Used to accumulate ImportStats.invalid_ean13 during import.
+    pub invalid_ean13: bool,
 }
 
 // ---- Normalizers per file ----
 
 fn normalize_cis_bdpm(f: &[String]) -> NormalizedRow {
-    // 12 fields: cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, alert_type, lab_name, is_patent, eu_number
+    // 13 fields: cis, name_raw, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, alert_type, eu_number
+    const EXPECTED: usize = 13;
+    const _: () = assert!(13 == EXPECTED, "normalize_cis_bdpm: expected 13 values");
     NormalizedRow {
         table: "drugs",
         values: vec![
             Some(f[0].clone()),  // cis
             Some(f[1].clone()),  // name_raw (original, before normalization)
             Some(normalize_spaces(&strip_field(&f[1]))),  // name (strip + normalize double-spaces)
-            Some(strip_field(&f[2])),  // form
-            Some(strip_field(&f[3])),  // route
+            Some(crate::normalize::fields::canonicalize_form(&strip_field(&f[2]))),  // form
+            Some(crate::normalize::fields::canonicalize_route(&strip_field(&f[3]))),  // route
             Some(strip_field(&f[4])),  // auth_status
             Some(strip_field(&f[5])),  // procedure_type
             Some(strip_field(&f[6])),  // comm_status
             parse_date_ddmmYYYY(&f[7]).ok(),  // auth_date ISO
-            Some(normalize_spaces(&strip_field(&f[10]))),  // lab_name (field 10: manufacturer lab)
+            Some(crate::normalize::fields::canonicalize_lab(&normalize_spaces(&strip_field(&f[10])))),  // lab_name
             Some(if f[11].trim().eq_ignore_ascii_case("oui") { "1" } else { "0" }.to_string()),  // is_patent (field 11: Oui/Non)
             if f[8].is_empty() { None } else { Some(strip_field(&f[8])) },  // alert_type (field 8)
             Some(strip_eu_slash(&f[9])),  // eu_number (field 9: EU authorization number)
         ],
+        invalid_ean13: false,
     }
 }
 
@@ -159,15 +205,6 @@ fn parse_dosage_mg(raw: &str) -> Option<String> {
         return None;
     }
 
-    // Reject homeopathic dilution patterns (CH, DH, K, X, LM)
-    // e.g., "4CH à 30CH", "5 mg (4 DH)", "30K"
-    if normalized
-        .split(|c: char| !c.is_alphabetic())
-        .any(|w| matches!(w, "ch" | "dh" | "k" | "x" | "lm"))
-    {
-        return None;
-    }
-
     // Reject range patterns ("45 - 70 mg", "10 à 20 mg")
     // e.g., "45 - 70 mg" would produce 4570.0 which is wrong
     if (normalized.contains('-') || normalized.contains("à"))
@@ -229,7 +266,15 @@ fn parse_dosage_mg(raw: &str) -> Option<String> {
 }
 
 fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 14;
+    const _: () = assert!(14 == EXPECTED, "normalize_cis_cip: expected 14 values");
     // 12 fields (after trailing empty strip): cis, cip7, labels, pres_status, comm_status, comm_date, ean13, reimbursable, reimb_rate, prix_ht, prix_ville, prix_rate
+    let ean13 = if f[6].is_empty() { None } else { Some(f[6].clone()) };
+    let ean13_str = ean13.as_deref().unwrap_or("");
+    let invalid_ean13 = !ean13_str.is_empty() && !validate_ean13(ean13_str);
+    if invalid_ean13 {
+        tracing::debug!("EAN-13 checksum invalid: {}", ean13_str);
+    }
     NormalizedRow {
         table: "presentations",
         values: vec![
@@ -245,10 +290,10 @@ fn normalize_cis_cip(f: &[String]) -> NormalizedRow {
             parse_price_cents(&f[10]).ok().flatten().map(|c| c.to_string()),  // prix_ville_cents
             parse_price_cents(&f[11]).ok().flatten().map(|c| c.to_string()),  // prix_rate_cents
             normalize_reimb_rate(&f[8]).map(|r| r.to_string()),  // reimb_rate
-            None,  // reimb_conditions (not in CIS_CIP_bdpm source)
-            if f[6].is_empty() { None } else { Some(f[6].clone()) },  // ean13
+            ean13,
             Some(strip_field(&f[7])),  // reimbursable (oui/non)
         ],
+        invalid_ean13,
     }
 }
 
@@ -268,25 +313,31 @@ fn normalize_reimb_rate(s: &str) -> Option<f32> {
 }
 
 fn normalize_compo(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 10;
+    const _: () = assert!(10 == EXPECTED, "normalize_compo: expected 10 values");
     // 8 fields: cis, form_label, substance_code, substance_name, dosage, per_unit, nature, seq
+    let substance_name_clean = strip_salt(&normalize_spaces(&strip_parens(&strip_field(&f[3]))));
     NormalizedRow {
         table: "compositions",
         values: vec![
             Some(f[0].clone()),
             Some(strip_field(&f[1])),
             Some(f[2].clone()),
-            Some(strip_field(&f[3])),
+            Some(strip_salt(&strip_field(&f[3]))),
             Some(f[4].clone()),
             Some(f[5].clone()),
             Some(f[6].clone()),
             Some(f[7].clone()),
-            Some(normalize_spaces(&strip_field(&f[3]))),  // substance_name_clean
-            parse_dosage_mg(&f[4]),                       // dosage_mg (numeric mg equivalent)
+            Some(substance_name_clean),  // substance_name_clean
+            parse_dosage_mg(&f[4]),      // dosage_mg (numeric mg equivalent)
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_smr(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 6;
+    const _: () = assert!(6 == EXPECTED, "normalize_smr: expected 6 values");
     // 6 fields: cis, ct_id, decision_type, decision_date, level, avis
     NormalizedRow {
         table: "smr",
@@ -298,10 +349,13 @@ fn normalize_smr(f: &[String]) -> NormalizedRow {
             Some(strip_field(&f[4])),
             Some(strip_avis_html(&f[5])),
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_asmr(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 6;
+    const _: () = assert!(6 == EXPECTED, "normalize_asmr: expected 6 values");
     // 6 fields: same structure as SMR
     NormalizedRow {
         table: "asmr",
@@ -313,10 +367,13 @@ fn normalize_asmr(f: &[String]) -> NormalizedRow {
             Some(strip_field(&f[4])),
             Some(strip_avis_html(&f[5])),
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_gener(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 5;
+    const _: () = assert!(5 == EXPECTED, "normalize_gener: expected 5 values");
     // 5 fields: group_id, group_name, cis, type_raw, sort_order
     NormalizedRow {
         table: "generic_groups",
@@ -327,10 +384,13 @@ fn normalize_gener(f: &[String]) -> NormalizedRow {
             Some(normalize_generic_type(&f[3]).to_string()),
             f[4].parse::<i32>().ok().map(|n| n.to_string()),
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_cpd(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 2;
+    const _: () = assert!(2 == EXPECTED, "normalize_cpd: expected 2 values");
     // 2 fields: cis, rule
     NormalizedRow {
         table: "prescription_rules",
@@ -338,10 +398,13 @@ fn normalize_cpd(f: &[String]) -> NormalizedRow {
             Some(f[0].clone()),
             Some(strip_field(&f[1])),
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_dispo(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 8;
+    const _: () = assert!(8 == EXPECTED, "normalize_dispo: expected 8 values");
     // 8 fields: cis, cip13(empty), status_type, status_label, date_start, date_end, date_remise(empty), url
     NormalizedRow {
         table: "availability",
@@ -355,10 +418,13 @@ fn normalize_dispo(f: &[String]) -> NormalizedRow {
             parse_date_ddmmYYYY(&f[6]).ok(),
             if f[7].is_empty() { None } else { Some(f[7].clone()) },
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_mitm(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 3;
+    const _: () = assert!(3 == EXPECTED, "normalize_mitm: expected 3 values");
     // Raw: 4 fields (cis, atc_code, drug_name, url)
     // DB:  3 columns (cis, atc_code, detail_url) — drug_name not stored
     NormalizedRow {
@@ -368,10 +434,13 @@ fn normalize_mitm(f: &[String]) -> NormalizedRow {
             Some(f[1].clone()),
             if f[3].is_empty() { None } else { Some(f[3].clone()) },
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_liens(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 2;
+    const _: () = assert!(2 == EXPECTED, "normalize_liens: expected 2 values");
     // 2 fields: ct_id, url
     NormalizedRow {
         table: "has_links",
@@ -379,10 +448,13 @@ fn normalize_liens(f: &[String]) -> NormalizedRow {
             Some(f[0].clone()),
             Some(f[1].clone()),
         ],
+        invalid_ean13: false,
     }
 }
 
 fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
+    const EXPECTED: usize = 5;
+    const _: () = assert!(5 == EXPECTED, "normalize_info_importantes: expected 5 values");
     // 4 fields: cis, start_date (YYYY-MM-DD ISO), end_date (YYYY-MM-DD ISO), message + url (HTML)
     // The message field contains embedded <a href="..."> links — strip HTML, keep text
     let raw_msg = strip_avis_html(&f[3]);
@@ -395,6 +467,7 @@ fn normalize_info_importantes(f: &[String]) -> NormalizedRow {
             Some(raw_msg),                             // message_plain (HTML stripped)
             None,                                      // source_url (extracted at import time)
         ],
+        invalid_ean13: false,
     }
 }
 
@@ -428,6 +501,7 @@ mod tests {
                 Some("SA".to_string()),
                 Some("0".to_string()),
             ],
+            invalid_ean13: false,
         }
     }
 
@@ -438,6 +512,7 @@ mod tests {
         let mut row = NormalizedRow {
             table: "smr",
             values: vec![Some("L\u{2019}important est d\u{2018}avoir".to_string())],
+            invalid_ean13: false,
         };
         normalize_apostrophes(&mut row);
         assert_eq!(row.values[0], Some("L'important est d'avoir".to_string()));
@@ -448,6 +523,7 @@ mod tests {
         let mut row = NormalizedRow {
             table: "smr",
             values: vec![Some("normal text".to_string())],
+            invalid_ean13: false,
         };
         normalize_apostrophes(&mut row);
         assert_eq!(row.values[0], Some("normal text".to_string()));
@@ -458,6 +534,7 @@ mod tests {
         let mut row = NormalizedRow {
             table: "smr",
             values: vec![None, Some("L\u{2019}important".to_string())],
+            invalid_ean13: false,
         };
         normalize_apostrophes(&mut row);
         assert_eq!(row.values[0], None);
@@ -547,8 +624,8 @@ mod tests {
         assert_eq!(result.values[1], Some("Doliprane".to_string()));
         // values[2]: name (normalized)
         assert_eq!(result.values[2], Some("Doliprane".to_string()));
-        // values[3]: form
-        assert_eq!(result.values[3], Some("comprimé".to_string()));
+        // values[3]: form (canonicalized)
+        assert_eq!(result.values[3], Some("CPR".to_string()));
         // values[4]: route
         assert_eq!(result.values[4], Some("orale".to_string()));
         // values[5]: auth_status
@@ -613,7 +690,8 @@ mod tests {
 
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row).unwrap();
 
-        // lab_name should have whitespace stripped
+        // lab_name should have whitespace stripped and suffix-stripped
+        // canonicalize_lab strips common legal suffixes (FRANCE, PHARMA, etc.)
         assert_eq!(result.values[9], Some("SANOFI".to_string()));
     }
 
@@ -736,7 +814,7 @@ mod tests {
 
     #[test]
     fn test_normalize_cis_bdpm_homeopathy_filtered() {
-        // Homeopathic procedure_type → None (filtered out)
+        // Homeopathic procedure_type (ENREG HOM) → None (filtered out)
         let row_homeo = make_cis_bdpm_row([
             "60004971", "Doliprane", "comprimé", "orale",
             "Autorisation active",
@@ -747,6 +825,18 @@ mod tests {
             "Non",                         // f[11]: is_patent
         ]);
         assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_homeo).is_none());
+
+        // BOIRON lab (normal procedure) → None (filtered out — homeopathic products)
+        let row_boiron = make_cis_bdpm_row([
+            "60004971", "STODAL, sirop", "sirop", "orale",
+            "Autorisation active",
+            "Procédure nationale",           // f[5]: normal procedure
+            "Commercialisée", "12/03/1998", "",
+            "",                               // f[9]: eu_number (empty)
+            "BOIRON",                         // f[10]: lab_name
+            "Non",                            // f[11]: is_patent
+        ]);
+        assert!(normalize_row(crate::download::manifest::BDPMFile::CIS_bdpm, &row_boiron).is_none());
 
         // Non-homeopathic procedure_type → Some
         let row_normal = make_cis_bdpm_row([
@@ -1162,7 +1252,7 @@ mod tests {
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
 
         assert_eq!(result.table, "presentations");
-        assert_eq!(result.values.len(), 15);
+        assert_eq!(result.values.len(), 14);
         assert_eq!(result.values[0], Some("60004971".to_string())); // cis
         assert_eq!(result.values[1], Some("0000017".to_string())); // cip (strip_cip7)
         assert_eq!(result.values[2], Some("3400930000017".to_string())); // cip_raw
@@ -1175,9 +1265,8 @@ mod tests {
         assert_eq!(result.values[9], Some("657".to_string())); // prix_ville_cents
         assert_eq!(result.values[10], Some("599".to_string())); // prix_rate_cents
         assert_eq!(result.values[11], Some("0.65".to_string())); // reimb_rate
-        assert_eq!(result.values[12], None); // reimb_conditions (always None for CIS_CIP_bdpm)
-        assert_eq!(result.values[13], Some("3400930000017".to_string())); // ean13
-        assert_eq!(result.values[14], Some("Oui".to_string())); // reimbursable
+        assert_eq!(result.values[12], Some("3400930000017".to_string())); // ean13
+        assert_eq!(result.values[13], Some("Oui".to_string())); // reimbursable
     }
 
     #[test]
@@ -1246,8 +1335,8 @@ mod tests {
             "",
         ]);
         let result = normalize_row(crate::download::manifest::BDPMFile::CIS_CIP_bdpm, &row).unwrap();
-        assert_eq!(result.values[13], None); // ean13 → None
-        assert_eq!(result.values[14], Some("Oui".to_string())); // reimbursable (not empty)
+        assert_eq!(result.values[12], None); // ean13 → None
+        assert_eq!(result.values[13], Some("Oui".to_string())); // reimbursable (not empty)
     }
 
     #[test]
@@ -1683,5 +1772,16 @@ mod tests {
         let row = make_liens_row(["ct12345", ""]);
         let result = normalize_row(crate::download::manifest::BDPMFile::HAS_LiensPageCT_bdpm, &row).unwrap();
         assert_eq!(result.values[1], Some("".to_string())); // empty url preserved
+    }
+
+    // --- DILUTION_RE tests ---
+
+    #[test]
+    fn test_dilution_regex_no_false_positive() {
+        assert!(DILUTION_RE.is_match("4CH à 30CH"));
+        assert!(DILUTION_RE.is_match("5K"));
+        assert!(DILUTION_RE.is_match("15LM"));
+        assert!(!DILUTION_RE.is_match("2 x 100 000 000 cellules"));
+        assert!(!DILUTION_RE.is_match("1 X 10"));
     }
 }

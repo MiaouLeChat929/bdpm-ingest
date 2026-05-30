@@ -45,8 +45,8 @@ fn create_test_db() -> PathBuf {
 
     // Insert test data
     conn.execute(
-        "INSERT OR REPLACE INTO drugs (cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, generic_type, atc_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO drugs (cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, atc_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             "60004971",
             "DOLIPRANE 1000 mg, comprimé",
@@ -58,14 +58,13 @@ fn create_test_db() -> PathBuf {
             "1998-03-12",
             "SANOFI",
             0,
-            "reference",
             "N02BE01"
         ]
     ).expect("Failed to insert test drug 1");
 
     conn.execute(
-        "INSERT OR REPLACE INTO drugs (cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, generic_type, atc_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO drugs (cis, name, form, route, auth_status, procedure_type, comm_status, auth_date, lab_name, is_patent, atc_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             "60004972",
             "EFFERALGAN 1000 mg, poudre",
@@ -77,7 +76,6 @@ fn create_test_db() -> PathBuf {
             "2005-06-15",
             "UPSA",
             0,
-            "generic",
             "N02BE01"
         ]
     ).expect("Failed to insert test drug 2");
@@ -87,7 +85,7 @@ fn create_test_db() -> PathBuf {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             "60004971",
-            "340093",
+            "3000001",
             "3400930000017",
             "16 comprimés",
             "Commercialisée",
@@ -107,7 +105,7 @@ fn create_test_db() -> PathBuf {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             "60004971",
-            "340094",
+            "4000001",
             "3400940000018",
             "32 comprimés",
             "Commercialisée",
