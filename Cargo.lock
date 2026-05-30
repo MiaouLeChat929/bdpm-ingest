@@ -173,7 +173,6 @@ dependencies = [
  "gtin-validate",
  "htmlize",
  "hyper",
- "once_cell",
  "phf 0.11.3",
  "rand 0.8.6",
  "rayon",

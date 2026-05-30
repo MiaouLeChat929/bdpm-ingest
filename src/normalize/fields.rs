@@ -1619,20 +1619,79 @@ pub static SALT_PREFIXES: &[&str] = &[
     "lactate de", "lactate d'",
     "camphosulfonate de",
     "bésylate de", "bésylate d'", "besylate de", "besylate d'",
+    "bésilate de", "bésilate d'", "besilate de", "besilate d'",
     "mésylate de", "mésylate d'", "mesylate de", "mesylate d'",
+    "mésilate de", "mésilate d'", "mesilate de", "mesilate d'",
+    "dimésylate de", "dimésilate de", "dimésylate d'", "dimésilate d'",
     "ésilate de", "ésilate d'", "esilate de", "esilate d'",
-    "pamoate de",
+    "pamoate de", "embonate de",
     "succinate de",
     "oxalate de", "oxalate d'",
-    "propionate de", "propionate d'",
+    "propionate de", "propionate d'", "dipropionate de",
     "clavulanate de",
     "alendronate de",
     "sel de", "sel d'",
     "iodure de",
-    "bromure de",
+    "bromure de", "bromure d'", "butylbromure de",
     "chlorure de", "chlorure d'",
-    "nitrate de",
+    "nitrate de", "nitrate d'", "dinitrate de", "mononitrate de",
     "ranélate de",
+    // Additional salt forms from audit
+    "xinafoate de",
+    "furoate de",
+    "digluconate de",
+    "fluorure de", "fluorure d'",
+    "résinate de", "resinate de",
+    "palmitate de",
+    "folinate de", "lévofolinate de",
+    "cromoglicate de",
+    "valproate de", "divalproate de",
+    "tosylate de", "tosilate de",
+    "benzoate de", "benzoate d'",
+    "valérate de", "valérate d'", "valerate de", "valerate d'",
+    "ascorbate de",
+    "hémisuccinate de", "hemisuccinate de",
+    "hydrogénosuccinate de",
+    "acéponate de", "aceponate de",
+    "acétylsalicylate de",
+    "amidotrizoate de",
+    "antimoniate de",
+    "bitartrate de",
+    "camsylate de",
+    "canrénoate de", "canrenoate de",
+    "caproate de",
+    "clodronate de",
+    "diaspartate de",
+    "diphosphate de",
+    "dobésilate de", "dobesilate de",
+    "énanthate de", "énantate de", "enanthe de", "enantate de",
+    "fusidate de",
+    "gadobénate de", "gadobenate de",
+    "gadotérate de", "gadoterate de",
+    "gluconolactate de",
+    "glycérophosphate de", "glycerophosphate de",
+    "hémicitrate de",
+    "hémintertrate de",
+    "hydroxy-4-butyrate de",
+    "laurilsulfate de",
+    "lysinate de",
+    "oxoglurate de",
+    "oxybate de",
+    "pamidronate de",
+    "pentétate de", "pentetate de",
+    "picosulfate de",
+    "pivalate de",
+    "salicylate de",
+    "sous-citrate de",
+    "thiosulfate de",
+    "trifluoroacétate de",
+    "trifénapate de",
+    "triméthylacétate de",
+    "trinitrate de",
+    "trisilicate de",
+    "undécanoate de",
+    "d'",  // strips leading "d'" from remaining substance names after prefix removal
+    "aspartate d'", "aspartate de",
 ];
 
 /// Salt suffixes — matched iteratively until no change (multi-pass).
@@ -1668,7 +1727,8 @@ pub static SALT_SUFFIXES: &[&str] = &[
     // Compound salt forms
     "sodique sesquihydraté", "sodique sesquihydrate",
     "disodique hémipentahydraté", "disodique hemipentahydrate",
-    "disodique",
+    // disodique is prefix-only (e.g., "disodique acetylsalicylate");
+    // not a suffix — removing prevents stripping "d'arginine" → "d"
     "hémifumarate", "hemifumarate",
     "hydrogénosulfate", "hydrogensulfate",
     "hydrogénotartrate", "hydrogentartrate",
@@ -1676,14 +1736,31 @@ pub static SALT_SUFFIXES: &[&str] = &[
     "sodique",
     "calcique",
     "potassique",
-    "mésylate", "mesylate",
+    "mésylate", "mesylate", "mésilate", "mesilate", "dimésylate", "dimésilate",
     "fumarate",
     "succinate",
     "camphosulfonate",
-    "pamoate",
+    "pamoate", "embonate",
     "ésilate", "esilate",
+    "bésylate", "besylate", "bésilate", "besilate",
+    "xinafoate",
+    "furoate",
+    "digluconate",
+    "dipropionate",
+    "résinate", "resinate",
+    "palmitate",
+    "folinate",
+    "cromoglicate",
+    "valproate",
+    "tosylate", "tosilate",
+    "benzoate",
+    "valérate", "valerate",
+    "ascorbate",
+    "nitrate", "dinitrate", "mononitrate", "trinitrate",
+    "bromure",
+    "fluorure",
     "cilexétil", "cilexetil",
-    "arginine",
+    "aspartate d'", "aspartate de",
     "tert-butylamine",
 ];
 
@@ -1702,12 +1779,15 @@ pub fn strip_salt(s: &str) -> String {
             break;
         }
     }
-    // Multi-pass suffix stripping
+    // Multi-pass suffix stripping (iterate until no change)
     loop {
         let before = result.clone();
         for suffix in SALT_SUFFIXES.iter() {
             let suffix_norm = strip_diacritics(&suffix.to_uppercase());
             let result_norm = strip_diacritics(&result.to_uppercase());
+            if result_norm.len() < suffix_norm.len() {
+                continue;
+            }
             if result_norm.ends_with(&suffix_norm) {
                 let end_pos = result_norm.len() - suffix_norm.len();
                 result = result[..end_pos].trim().to_string();
@@ -1990,6 +2070,57 @@ mod tests {
         // hydrates
         assert_eq!(strip_salt("calcium dihydraté"), "calcium");
         assert_eq!(strip_salt("magnésium hexahydraté"), "magnésium");
+    }
+
+    #[test]
+    fn test_strip_salt_amino_acids_preserved() {
+        // Arginine is an amino acid (active ingredient), NOT a salt form.
+        // It must NOT be stripped as a suffix — regression test for BDPM substance_code 01178.
+        assert_eq!(strip_salt("arginine"), "arginine");
+        assert_eq!(strip_salt("L-arginine"), "L-arginine");
+        assert_eq!(strip_salt("ARGININE"), "ARGININE");
+        // "d'arginine" directly: prefix "d'" matches → stripped to "arginine"
+        assert_eq!(strip_salt("d'arginine"), "arginine");
+        // "chlorhydrate d'arginine" → compound prefix "chlorhydrate d'" stripped → "arginine"
+        assert_eq!(strip_salt("chlorhydrate d'arginine"), "arginine");
+        // "arginine (chlorhydrate)" — parenthetical is NOT stripped by strip_salt alone
+        // (normalize_compo strips parens via strip_parens first, then passes result to strip_salt)
+        // Here we just verify strip_salt doesn't corrupt the input:
+        assert_eq!(strip_salt("arginine (chlorhydrate)"), "arginine (chlorhydrate)");
+    }
+
+    #[test]
+    fn test_strip_salt_audit_prefixes() {
+        // High-frequency salt forms found during DB audit
+        // bésilate (alternate spelling of bésylate) — 157 rows
+        assert_eq!(strip_salt("bésilate d'amlodipine"), "amlodipine");
+        assert_eq!(strip_salt("BÉSILATE D'AMLODIPINE"), "AMLODIPINE");
+        // xinafoate — 42 rows
+        assert_eq!(strip_salt("xinafoate de salmétérol"), "salmétérol");
+        // digluconate — 27 rows
+        assert_eq!(strip_salt("digluconate de chlorhexidine"), "chlorhexidine");
+        // dipropionate — 38 rows
+        assert_eq!(strip_salt("dipropionate de béclométasone"), "béclométasone");
+        // furoate — 30 rows
+        assert_eq!(strip_salt("furoate de mométasone"), "mométasone");
+        // nitrate d' — 45 rows
+        assert_eq!(strip_salt("nitrate d'éconazole"), "éconazole");
+        // bromure d' — 36 rows
+        assert_eq!(strip_salt("bromure d'ipratropium"), "ipratropium");
+        // mésylate d' — 22 rows
+        assert_eq!(strip_salt("mésylate d'imatimib"), "imatimib");
+        // mésilate (I-variant) — same salt form, alternate spelling
+        assert_eq!(strip_salt("mésilate d'imatimib"), "imatimib");
+        assert_eq!(strip_salt("MÉSILATE D'IMATINIB"), "IMATINIB");
+        assert_eq!(strip_salt("dimésylate de lisdexamfetamine"), "lisdexamfetamine");
+        assert_eq!(strip_salt("dimésilate de lisdexamfetamine"), "lisdexamfetamine");
+        // palmitate — 17 rows
+        assert_eq!(strip_salt("palmitate de palipéridone"), "palipéridone");
+        // résinate — 17 rows
+        assert_eq!(strip_salt("résinate de nicotine"), "nicotine");
+        // tosylate/tosilate — 13 rows
+        assert_eq!(strip_salt("tosylate de périndopril"), "périndopril");
+        assert_eq!(strip_salt("tosilate de périndopril"), "périndopril");
     }
 
     // --- fts_normalize ---

@@ -42,9 +42,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # HTML stripping
 regex-lite = "0.1"
 
-# Lazy static initialization for regex patterns
-once_cell = "1"
-
 # Unicode normalization (diacritic stripping for FTS)
 unicode-normalization = "0.1"
 
