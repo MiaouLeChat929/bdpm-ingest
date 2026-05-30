@@ -1755,7 +1755,6 @@ pub static SALT_SUFFIXES: &[&str] = &[
     "tosylate", "tosilate",
     "benzoate",
     "valérate", "valerate",
-    "ascorbate",
     "nitrate", "dinitrate", "mononitrate", "trinitrate",
     "bromure",
     "fluorure",
@@ -2187,5 +2186,14 @@ mod strip_salt_snapshots {
             assert_eq!(output, _expected, "input: {input}");
             assert_debug_snapshot!(input.replace(['\'', ' '], "_"), &output);
         }
+    }
+
+    #[test]
+    fn test_strip_salt_ascorbate_sodique() {
+        // ASCORBATE SODIQUE — the exact raw value for CIS 65686611 seq 14
+        let result = strip_salt("ASCORBATE SODIQUE");
+        eprintln!("strip_salt result = |{}| (len={})", result, result.len());
+        assert!(!result.is_empty(), "strip_salt returned empty for ASCORBATE SODIQUE");
+        assert_eq!(result, "ASCORBATE", "should strip SODIQUE suffix");
     }
 }
