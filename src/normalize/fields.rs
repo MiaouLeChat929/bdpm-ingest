@@ -2190,10 +2190,8 @@ mod strip_salt_snapshots {
 
     #[test]
     fn test_strip_salt_ascorbate_sodique() {
-        // ASCORBATE SODIQUE — the exact raw value for CIS 65686611 seq 14
-        let result = strip_salt("ASCORBATE SODIQUE");
-        eprintln!("strip_salt result = |{}| (len={})", result, result.len());
-        assert!(!result.is_empty(), "strip_salt returned empty for ASCORBATE SODIQUE");
-        assert_eq!(result, "ASCORBATE", "should strip SODIQUE suffix");
+        // ASCORBATE SODIQUE — regression: ascorbate was in SALT_SUFFIXES
+        // and stripped the entire active ingredient to empty string.
+        assert_eq!(strip_salt("ASCORBATE SODIQUE"), "ASCORBATE");
     }
 }
