@@ -2136,3 +2136,56 @@ mod tests {
         assert_eq!(fts_normalize("Doliprane de Sanofi"), "doliprane sanofi"); // "de" removed
     }
 }
+
+// --- insta snapshots for strip_salt ---
+
+#[cfg(test)]
+mod strip_salt_snapshots {
+    use super::*;
+    use insta::assert_debug_snapshot;
+
+    #[test]
+    fn test_strip_salt_snapshot_complex_forms() {
+        let cases = vec![
+            // High-frequency salt forms
+            ("bésilate d'amlodipine", "amlodipine"),
+            ("BÉSILATE D'AMLODIPINE", "AMLODIPINE"),
+            ("chlorhydrate d'arginine", "arginine"),
+            ("mésylate d'imatinib", "imatinib"),
+            ("MÉSILATE D'IMATINIB", "IMATINIB"),
+            ("dimésylate de lisdexamfetamine", "lisdexamfetamine"),
+            ("xinafoate de salmétérol", "salmétérol"),
+            ("digluconate de chlorhexidine", "chlorhexidine"),
+            ("dipropionate de béclométasone", "béclométasone"),
+            ("furoate de mométasone", "mométasone"),
+            ("nitrate d'éconazole", "éconazole"),
+            ("bromure d'ipratropium", "ipratropium"),
+            // Hydrate forms
+            ("amoxicilline trihydratée", "amoxicilline"),
+            ("pantoprazole sodique sesquihydraté", "pantoprazole"),
+            ("calcium dihydraté", "calcium"),
+            ("magnésium hexahydraté", "magnésium"),
+            // Amino acids (must NOT be stripped)
+            ("arginine", "arginine"),
+            ("L-arginine", "L-arginine"),
+            ("d'arginine", "arginine"),
+            // Multi-pass suffix stripping
+            ("paracetamol chlorhydrate monohydrate", "paracetamol"),
+            ("diclofenac sodique", "diclofenac"),
+            ("atorvastatine calcique", "atorvastatine"),
+            ("chlorhydrate de sodium", "sodium"),
+            ("bicarbonate de sodium", "sodium"),
+            // No salt form
+            ("paracetamol 500mg", "paracetamol 500mg"),
+            ("aspirine", "aspirine"),
+            // Empty
+            ("", ""),
+        ];
+
+        for (input, _expected) in cases {
+            let output = strip_salt(input);
+            assert_eq!(output, _expected, "input: {input}");
+            assert_debug_snapshot!(input.replace(['\'', ' '], "_"), &output);
+        }
+    }
+}

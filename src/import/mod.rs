@@ -2,8 +2,11 @@
 //! Orchestrates: parse → normalize → dedup (compo) → dedup (state check) → import
 
 use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rusqlite::Connection;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::path::Path;
 
 use crate::db::{create_fts_tables, optimize_for_bulk_insert, restore_normal_settings};
@@ -149,6 +152,7 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
 
         // Parse
         let path = raw_dir.join(file.filename());
+        let t_parse = std::time::Instant::now();
         let raw_rows = match parse_file(&path, file) {
             Ok(rows) => rows,
             Err(e) => {
@@ -163,12 +167,24 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
                 continue;
             }
         };
+        tracing::debug!("{}: parsed {} rows ({}ms)", file.filename(), raw_rows.len(), t_parse.elapsed().as_millis());
 
         // Normalize (homeopathic drugs return None and are dropped)
         // CIS_COMPO_bdpm: parallel normalization via rayon (32K+ rows)
         // All other files: sequential filter_map
         let mut normalized: Vec<_> = if file == BDPMFile::CIS_COMPO_bdpm {
+            let count = Arc::new(AtomicUsize::new(0));
+            let pb = ProgressBar::new(raw_rows.len() as u64);
+            pb.set_style({
+                ProgressStyle::default_bar()
+                    .template("[{elapsed}] {bar:40} {pos}/{len} ({per_sec}) {msg}")
+                    .unwrap_or_else(|_| panic!("indicatif template is valid"))
+                    .progress_chars("=>-")
+            });
+            pb.set_message("CIS_COMPO normalize");
+
             let (tx, rx) = std::sync::mpsc::channel();
+            let count_clone = Arc::clone(&count);
             raw_rows
                 .into_iter()
                 .enumerate()
@@ -178,9 +194,12 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
                     if let Some(mut nr) = normalize_row(file, &row) {
                         normalize_apostrophes(&mut nr);
                         let _ = tx.send((idx, nr));
+                        count_clone.fetch_add(1, Ordering::Relaxed);
+                        pb.set_position(count.load(Ordering::Relaxed) as u64);
                     }
                 });
             drop(tx);
+            pb.finish();
             let mut parallel_rows: Vec<(usize, _)> = rx.into_iter().collect();
             parallel_rows.sort_by_key(|(idx, _)| *idx);
             parallel_rows.into_iter().map(|(_, r)| r).collect()
@@ -195,12 +214,14 @@ pub fn run_ingest(data_dir: &Path, conn: &mut Connection) -> Result<ImportReport
                 .collect()
         };
 
+        let t_norm = std::time::Instant::now();
         // Dedup CIS_COMPO
         if file == BDPMFile::CIS_COMPO_bdpm {
             let before = normalized.len();
             normalized = dedup_compo(normalized);
             tracing::info!("CIS_COMPO dedup: {} → {} rows", before, normalized.len());
         }
+        tracing::debug!("{}: normalized {} rows ({}ms)", file.filename(), normalized.len(), t_norm.elapsed().as_millis());
 
         // Import
         match import_file(conn, file, &normalized) {
@@ -341,6 +362,15 @@ fn import_file(
         let sql = insert_sql(file);
         let mut stmt = tx.prepare_cached(&sql)?;
 
+        let pb = ProgressBar::new(rows.len() as u64);
+        pb.set_style({
+            ProgressStyle::default_bar()
+                .template("[{elapsed}] {bar:40} {pos}/{len} ({per_sec}) {msg}")
+                .unwrap_or_else(|_| panic!("indicatif template is valid"))
+                .progress_chars("=>-")
+        });
+        pb.set_message(table);
+
         for (line_number, row) in rows.iter().enumerate() {
             let res = match file {
                 BDPMFile::CIS_bdpm => {
@@ -478,7 +508,9 @@ fn import_file(
                     }
                 }
             }
+            pb.inc(1);
         }
+        pb.finish();
 
         drop(stmt);
         tx.commit()?;
