@@ -179,7 +179,7 @@ paths:
   /drugs/{cis}/safety:
     get:
       tags:
-      - super::safety
+      - bdpm-ingest
       summary: GET /drugs/{cis}/safety
       description: |-
         Returns safety alerts for a drug from the `safety_alerts` table.

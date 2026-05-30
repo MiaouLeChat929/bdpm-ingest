@@ -257,11 +257,11 @@ const CIS_INFO_IMPORTANTES: FileSchema = FileSchema {
     filename: "CIS_InfoImportantes.txt",
     // Note: different path pattern — no `/file/` segment (on-demand generation)
     download_path: "/download/CIS_InfoImportantes.txt",
-    encoding: Encoding::Windows1252,
+    encoding: Encoding::Utf8,
     field_count: 4,
     date_fields: &[
-        (1, DateFormat::DDMMYYYY), // start_date
-        (2, DateFormat::DDMMYYYY), // end_date
+        (1, DateFormat::ISO8601), // start_date (ISO-8601: "2021-09-29")
+        (2, DateFormat::ISO8601), // end_date (ISO-8601: "2026-09-29")
     ],
     has_trailing_tab_fix: false,
     target_table: "safety_alerts",

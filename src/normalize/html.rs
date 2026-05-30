@@ -1,92 +1,14 @@
 use regex_lite::Regex;
 
-/// Decode HTML entities that survive tag stripping.
+/// Decode HTML entities using WHATWG-compliant decoder.
 ///
-/// Handles named entities (`&nbsp;`, `&`, `<`, `>`, `"`, `&#39;`)
-/// and numeric entities including high-bit values used in BDPM files.
+/// Handles named entities (`&nbsp;`, `&eacute;`, `&ecirc;`, etc.)
+/// and numeric entities (decimal `&#233;` and hex `&#xE9;`).
+/// Follows the WHATWG HTML spec via the `htmlize` crate.
+/// Non-breaking spaces (U+00A0 from `&nbsp;`) are normalized to regular spaces.
 pub fn decode_html_entities(raw: &str) -> String {
-    let mut result = raw.to_string();
-
-    // Named entities — most common ones from BDPM data
-    result = result.replace("&nbsp;", " ");
-    result = result.replace("&amp;", "&");
-    result = result.replace("&lt;", "<");
-    result = result.replace("&gt;", ">");
-    result = result.replace("\u{201C}\u{201D}", "\"");   // curly quotes -> "
-    result = result.replace("&#39;", "'");               // numeric apostrophe
-    result = result.replace("\u{2018}\u{2019}", "'");   // curly apostrophes -> '
-    result = result.replace("&ndash;", "\u{2013}");     // en dash
-    result = result.replace("&mdash;", "\u{2014}");     // em dash
-    result = result.replace("&hellip;", "\u{2026}");    // ellipsis
-    result = result.replace("&copy;", "(c)");
-    result = result.replace("&reg;", "(R)");
-    result = result.replace("&trade;", "(TM)");
-
-    // French accented named entities (present in BDPM HTML data)
-    result = result.replace("&eacute;", "é");
-    result = result.replace("&Eacute;", "É");
-    result = result.replace("&egrave;", "è");
-    result = result.replace("&Egrave;", "È");
-    result = result.replace("&ecirc;", "ê");
-    result = result.replace("&Ecirc;", "Ê");
-    result = result.replace("&euml;", "ë");
-    result = result.replace("&Euml;", "Ë");
-    result = result.replace("&agrave;", "à");
-    result = result.replace("&Agrave;", "À");
-    result = result.replace("&acirc;", "â");
-    result = result.replace("&Acirc;", "Â");
-    result = result.replace("&ccedil;", "ç");
-    result = result.replace("&Ccedil;", "Ç");
-    result = result.replace("&ocirc;", "ô");
-    result = result.replace("&Ocirc;", "Ô");
-    result = result.replace("&ouml;", "ö");
-    result = result.replace("&Ouml;", "Ö");
-    result = result.replace("&ucirc;", "û");
-    result = result.replace("&Ucirc;", "Û");
-    result = result.replace("&ugrave;", "ù");
-    result = result.replace("&Ugrave;", "Ù");
-    result = result.replace("&uuml;", "ü");
-    result = result.replace("&Uuml;", "Ü");
-    result = result.replace("&icirc;", "î");
-    result = result.replace("&Icirc;", "Î");
-    result = result.replace("&iuml;", "ï");
-    result = result.replace("&Iuml;", "Ï");
-
-    // Numeric decimal entities (&#nnn;) — common accented chars for French content
-    // French accented letters: é, è, ê, ë, ô, ö, û, ü, ù, ç
-    decode_numeric_entities_in_place(&mut result);
-
-    result
-}
-
-/// Decode numeric decimal entities in place.
-fn decode_numeric_entities_in_place(s: &mut String) {
-    // Pattern: &# followed by digits then semicolon
-    static NUMERIC_RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"&#(\d+);").unwrap());
-
-    // Collect matches in reverse order to preserve indices
-    let matches: Vec<_> = NUMERIC_RE.find_iter(s).collect();
-    if matches.is_empty() {
-        return;
-    }
-
-    // Process in reverse to reconstruct from end
-    let mut chars: Vec<char> = s.chars().collect();
-    for m in matches.iter().rev() {
-        if let Ok(code) = m.as_str()[2..m.as_str().len() - 1].parse::<u32>() {
-            if let Some(c) = char::from_u32(code) {
-                let start = m.start();
-                let end = m.end();
-                for _ in 0..(end - start) {
-                    chars.remove(start);
-                }
-                chars.insert(start, c);
-            }
-        }
-    }
-
-    *s = chars.into_iter().collect();
+    htmlize::unescape(raw)
+        .replace('\u{A0}', " ")
 }
 
 /// Normalize multiple consecutive newlines to a maximum of 2.
@@ -224,5 +146,12 @@ mod tests {
         assert_eq!(normalize_newlines("a\n\n\n\nb"), "a\n\nb");
         assert_eq!(normalize_newlines("x\n\n\n\n\n\ny"), "x\n\ny");
         assert_eq!(normalize_newlines("normal\ntext"), "normal\ntext");
+    }
+
+    #[test]
+    fn test_decode_hex_entities() {
+        assert_eq!(decode_html_entities("caf&#xE9; noir"), "café noir");
+        assert_eq!(decode_html_entities("&#x00E9;"), "é");
+        assert_eq!(decode_html_entities("&#xC9;cole"), "École");
     }
 }

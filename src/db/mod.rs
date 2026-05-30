@@ -50,5 +50,7 @@ pub fn optimize_for_bulk_insert(conn: &Connection) {
 
 /// Restore normal settings (after import completes)
 pub fn restore_normal_settings(conn: &Connection) {
-    let _ = conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA cache_size=-2000; PRAGMA wal_checkpoint(TRUNCATE);");
+    let _ = conn.execute_batch(
+        "PRAGMA synchronous=NORMAL; PRAGMA cache_size=-2000; PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize=0x10002;"
+    );
 }

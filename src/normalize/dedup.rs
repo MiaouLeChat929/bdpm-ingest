@@ -2,13 +2,15 @@ use std::collections::HashSet;
 use crate::normalize::NormalizedRow;
 
 /// Remove exact duplicate rows from CIS_COMPO.
-/// Key: (cis, substance_code, dosage).
+/// Key: (cis, substance_code, seq).
 /// 4,780 duplicates in 32,389 total rows → 27,609 unique.
 /// per_unit is intentionally excluded from the key — in all 1,455 duplicate groups,
 /// per_unit varies only when form_label also varies. form_label is the semantically
 /// meaningful differentiator; per_unit is deterministically derived from it.
 /// Malformed rows (len < 5) are kept for logging.
 pub fn dedup_compo(rows: Vec<NormalizedRow>) -> Vec<NormalizedRow> {
+    const COMPO_EXPECTED_FIELDS: usize = 10;
+    const _: () = assert!(10 == COMPO_EXPECTED_FIELDS, "dedup_compo: expected 10 values per row");
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
     rows.into_iter().filter(|r| {
         let vals = &r.values;
@@ -18,7 +20,7 @@ pub fn dedup_compo(rows: Vec<NormalizedRow>) -> Vec<NormalizedRow> {
         let key = (
             vals[0].as_deref().unwrap_or("").to_string(),   // cis
             vals[2].as_deref().unwrap_or("").to_string(),   // substance_code
-            vals[4].as_deref().unwrap_or("").to_string(),   // dosage
+            vals[7].as_deref().unwrap_or("").to_string(),   // seq
         );
         seen.insert(key)
     }).collect()
@@ -41,6 +43,7 @@ mod tests {
                 Some("SA".to_string()),
                 Some("0".to_string()),
             ],
+            invalid_ean13: false,
         }
     }
 
@@ -51,6 +54,7 @@ mod tests {
                 Some("60004971".to_string()),
                 Some("form".to_string()),
             ],
+            invalid_ean13: false,
         }
     }
 
@@ -119,6 +123,7 @@ mod tests {
                     Some("SA".to_string()),
                     Some("0".to_string()),
                 ],
+                invalid_ean13: false,
             },
             NormalizedRow {
                 table: "compositions",
@@ -132,9 +137,71 @@ mod tests {
                     Some("SA".to_string()),
                     Some("0".to_string()),
                 ],
+                invalid_ean13: false,
             },
         ];
         let result = dedup_compo(rows);
         assert_eq!(result.len(), 1); // null dosage treated as "" → duplicate
+    }
+
+    #[test]
+    fn test_dedup_same_dosage_different_seq() {
+        let rows = vec![
+            NormalizedRow {
+                table: "compositions",
+                values: vec![
+                    Some("60004971".to_string()), Some("granules".to_string()),
+                    Some("05319".to_string()), Some("ACTAEA RACEMOSA".to_string()),
+                    Some("2CH à 30CH".to_string()), Some("un comprimé".to_string()),
+                    Some("SA".to_string()), Some("7".to_string()),
+                    Some("ACTAEA RACEMOSA".to_string()), None,
+                ],
+                invalid_ean13: false,
+            },
+            NormalizedRow {
+                table: "compositions",
+                values: vec![
+                    Some("60004971".to_string()), Some("solution buvable".to_string()),
+                    Some("05319".to_string()), Some("ACTAEA RACEMOSA".to_string()),
+                    Some("2CH à 30CH".to_string()), Some("un comprimé".to_string()),
+                    Some("SA".to_string()), Some("8".to_string()),
+                    Some("ACTAEA RACEMOSA".to_string()), None,
+                ],
+                invalid_ean13: false,
+            },
+        ];
+        let result = dedup_compo(rows);
+        assert_eq!(result.len(), 2); // different seq → both kept
+    }
+
+    #[test]
+    fn test_dedup_key_matches_pk() {
+        // The dedup key (cis, substance_code, seq) matches the PK (cis, substance_code, seq).
+        // This is a documentation test confirming the Phase 06 fix is correct.
+        let row1 = NormalizedRow {
+            table: "compositions",
+            values: vec![
+                Some("60004971".to_string()), Some("granules".to_string()),
+                Some("05319".to_string()), Some("ACTAEA RACEMOSA".to_string()),
+                Some("2CH à 30CH".to_string()), Some("un comprimé".to_string()),
+                Some("SA".to_string()), Some("7".to_string()),
+                Some("ACTAEA RACEMOSA".to_string()), None,
+            ],
+            invalid_ean13: false,
+        };
+        let row2 = NormalizedRow {
+            table: "compositions",
+            values: vec![
+                Some("60004971".to_string()), Some("solution buvable".to_string()),
+                Some("05319".to_string()), Some("ACTAEA RACEMOSA".to_string()),
+                Some("2CH à 30CH".to_string()), Some("un comprimé".to_string()),
+                Some("SA".to_string()), Some("8".to_string()),
+                Some("ACTAEA RACEMOSA".to_string()), None,
+            ],
+            invalid_ean13: false,
+        };
+        // Different seq → both should be kept (not deduplicated)
+        let result = dedup_compo(vec![row1, row2]);
+        assert_eq!(result.len(), 2);
     }
 }

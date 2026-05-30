@@ -32,7 +32,7 @@ impl TabParser {
             Encoding::Utf8 => encoding_rs::UTF_8,
         };
 
-        let (decoded, encoding_used, had_errors) = encoding.decode(&bytes);
+        let (decoded, _encoding_used, had_errors) = encoding.decode(&bytes);
         let content = decoded.into_owned().into_bytes();
 
         // Validate: UTF-8 replacement chars (U+FFFD) indicate wrong charset.

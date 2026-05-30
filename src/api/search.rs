@@ -81,10 +81,8 @@ pub async fn search_drugs(
         return Json(vec![] as Vec<DrugSearchResult>);
     }
 
-    // Build FTS5 prefix query for partial matching
     // Sanitize user input to prevent FTS5 operator injection
     let sanitized = sanitize_fts_query(q);
-    let fts_query = format!("{}*", sanitized);
     let limit = params.limit as i64;
 
     let results = tokio::task::spawn_blocking(move || -> Vec<DrugSearchResult> {
@@ -102,18 +100,31 @@ pub async fn search_drugs(
         ];
         let order_by = sort_clause(params.sort.as_deref(), params.order.as_deref(), &allowed);
 
-        let sql = format!(
-            "SELECT d.cis, d.name, d.form, d.lab_name FROM drugs d \
-             INNER JOIN drugs_fts fts ON d.cis = fts.cis WHERE drugs_fts MATCH ?1 {} LIMIT ?2",
-            order_by
-        );
+        // Short query (< 3 chars): use LIKE prefix match
+        // Normal query: FTS5 trigram MATCH
+        let (sql, param): (String, String) = if sanitized.chars().count() < 3 {
+            let sql = format!(
+                "SELECT d.cis, d.name, d.form, d.lab_name FROM drugs d \
+                 WHERE UPPER(d.name) LIKE UPPER(?1) || '%' {} LIMIT ?2",
+                order_by
+            );
+            (sql, sanitized)
+        } else {
+            let fts_query = format!("{}*", sanitized);
+            let sql = format!(
+                "SELECT d.cis, d.name, d.form, d.lab_name FROM drugs d \
+                 INNER JOIN drugs_fts fts ON d.cis = fts.cis WHERE drugs_fts MATCH ?1 {} LIMIT ?2",
+                order_by
+            );
+            (sql, fts_query)
+        };
 
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
 
-        let query_result: Vec<DrugSearchResult> = stmt.query_map(params![&fts_query, limit], |row| {
+        let query_result: Vec<DrugSearchResult> = stmt.query_map(params![&param, limit], |row| {
             Ok(DrugSearchResult {
                 cis: row.get(0)?,
                 name: row.get(1)?,
