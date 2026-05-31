@@ -78,6 +78,23 @@ jobs:
           cargo run --release -- dump-open-api > /tmp/generated_openapi.yaml
           diff /tmp/generated_openapi.yaml src/api/openapi.yaml || (echo "ERROR: openapi.yaml is out of date. Run 'cargo run --release -- dump-open-api > src/api/openapi.yaml' and commit." && exit 1)
 
+  bench-compile:
+    name: Benchmark Compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Install libclang-dev
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "bdpm-${{ runner.os }}"
+          cache-on-failure: true
+      - name: Verify benchmarks compile
+        run: cargo bench --no-run
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest

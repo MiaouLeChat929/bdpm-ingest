@@ -41,6 +41,7 @@ pub fn build_app(db_path: PathBuf) -> Router {
         .route("/openapi.yaml", get(openapi::openapi_yaml))
         .route("/drugs", get(search::search_drugs))
         .route("/drugs/{cis}", get(drugs::drug_detail))
+        .route("/drugs/{cis}/atc", get(drugs::drug_atc_codes))
         .route("/drugs/{cis}/safety", get(safety::drug_safety))
         .route("/generic-groups", get(groups::list_generic_groups))
         .route("/generic-groups/{group_id}", get(groups::generic_group_detail))

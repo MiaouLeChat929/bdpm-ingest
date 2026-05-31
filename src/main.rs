@@ -39,6 +39,11 @@ enum Command {
         #[arg(long, default_value = "data")]
         data_dir: PathBuf,
     },
+    /// Print orphan row counts per table
+    OrphanStats {
+        #[arg(long, default_value = "data")]
+        data_dir: PathBuf,
+    },
     /// Print import log history
     Logs {
         #[arg(long, default_value = "data")]
@@ -130,6 +135,35 @@ fn main() -> Result<()> {
                     .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
                     .unwrap_or(0);
                 println!("{}: {}", table, count);
+            }
+        }
+
+        Command::OrphanStats { data_dir } => {
+            let db_path = data_dir.join("bdpm.db");
+            if !db_path.exists() {
+                anyhow::bail!("Database not found at {}. Run 'bdpm-ingest ingest' first.", db_path.display());
+            }
+            let conn = rusqlite::Connection::open(&db_path)?;
+
+            let orphan_tables = [
+                ("presentations", "presentations"),
+                ("compositions", "compositions"),
+                ("generic_groups", "generic_groups"),
+                ("smr", "smr"),
+                ("asmr", "asmr"),
+            ];
+
+            println!("{:<20} {:>10} {:>10}", "table", "orphans", "total");
+            println!("{}", "-".repeat(55));
+            for (label, table) in &orphan_tables {
+                let orphans: i64 = conn
+                    .query_row(&format!("SELECT COUNT(*) FROM {table} WHERE is_orphan = 1"), [], |r| r.get(0))
+                    .unwrap_or(0);
+                let total: i64 = conn
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                    .unwrap_or(0);
+                let pct = if total > 0 { orphans as f64 / total as f64 * 100.0 } else { 0.0 };
+                println!("{:<20} {:>10} {:>10}  {:.1}%", label, orphans, total, pct);
             }
         }
 

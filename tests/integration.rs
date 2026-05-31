@@ -66,7 +66,7 @@ fn parse_price_cents(raw: &str) -> Result<Option<i64>, String> {
 }
 
 /// Parse DD/MM/YYYY -> "YYYY-MM-DD" (ISO-8601).
-fn parse_date_ddmmYYYY(raw: &str) -> Result<String, String> {
+fn parse_date_ddmm_yyyy(raw: &str) -> Result<String, String> {
     let parts: Vec<&str> = raw.trim().split('/').collect();
     if parts.len() != 3 {
         return Err(format!("Invalid DD/MM/YYYY date: {}", raw));
@@ -90,7 +90,7 @@ fn parse_date_ddmmYYYY(raw: &str) -> Result<String, String> {
 }
 
 /// Parse YYYYMMDD (integer or string) -> "YYYY-MM-DD".
-fn parse_date_YYYYMMDD(raw: &str) -> Result<String, String> {
+fn parse_date_yyyymmdd(raw: &str) -> Result<String, String> {
     let s = raw.trim();
     if s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()) {
         return Err(format!("Invalid YYYYMMDD date: {}", raw));
@@ -186,35 +186,35 @@ fn test_price_normalization_large_thousands() {
 
 #[test]
 fn test_date_parsing_yyyymmdd_to_iso() {
-    assert_eq!(parse_date_YYYYMMDD("20260422").unwrap(), "2026-04-22");
-    assert_eq!(parse_date_YYYYMMDD("19980103").unwrap(), "1998-01-03");
-    assert_eq!(parse_date_YYYYMMDD("20250601").unwrap(), "2025-06-01");
-    assert_eq!(parse_date_YYYYMMDD("20000101").unwrap(), "2000-01-01");
+    assert_eq!(parse_date_yyyymmdd("20260422").unwrap(), "2026-04-22");
+    assert_eq!(parse_date_yyyymmdd("19980103").unwrap(), "1998-01-03");
+    assert_eq!(parse_date_yyyymmdd("20250601").unwrap(), "2025-06-01");
+    assert_eq!(parse_date_yyyymmdd("20000101").unwrap(), "2000-01-01");
 }
 
 #[test]
 fn test_date_parsing_ddmmyyyy_to_iso() {
-    assert_eq!(parse_date_ddmmYYYY("28/04/2026").unwrap(), "2026-04-28");
-    assert_eq!(parse_date_ddmmYYYY("01/01/1998").unwrap(), "1998-01-01");
-    assert_eq!(parse_date_ddmmYYYY("15/12/2025").unwrap(), "2025-12-15");
-    assert_eq!(parse_date_ddmmYYYY("31/12/2000").unwrap(), "2000-12-31");
+    assert_eq!(parse_date_ddmm_yyyy("28/04/2026").unwrap(), "2026-04-28");
+    assert_eq!(parse_date_ddmm_yyyy("01/01/1998").unwrap(), "1998-01-01");
+    assert_eq!(parse_date_ddmm_yyyy("15/12/2025").unwrap(), "2025-12-15");
+    assert_eq!(parse_date_ddmm_yyyy("31/12/2000").unwrap(), "2000-12-31");
 }
 
 #[test]
 fn test_date_parsing_out_of_range() {
     // Far-future date (CIS 66338445 has 29/11/2924)
-    assert!(parse_date_ddmmYYYY("29/11/2924").is_err());
-    assert!(parse_date_ddmmYYYY("29/11/1890").is_err());
+    assert!(parse_date_ddmm_yyyy("29/11/2924").is_err());
+    assert!(parse_date_ddmm_yyyy("29/11/1890").is_err());
     // Invalid dates
-    assert!(parse_date_ddmmYYYY("32/01/2026").is_err());
-    assert!(parse_date_ddmmYYYY("01/13/2026").is_err());
+    assert!(parse_date_ddmm_yyyy("32/01/2026").is_err());
+    assert!(parse_date_ddmm_yyyy("01/13/2026").is_err());
 }
 
 #[test]
 fn test_date_parsing_invalid_format() {
-    assert!(parse_date_YYYYMMDD("20261").is_err());
-    assert!(parse_date_YYYYMMDD("abcdefgh").is_err());
-    assert!(parse_date_ddmmYYYY("2026-04-22").is_err()); // Wrong separator
+    assert!(parse_date_yyyymmdd("20261").is_err());
+    assert!(parse_date_yyyymmdd("abcdefgh").is_err());
+    assert!(parse_date_ddmm_yyyy("2026-04-22").is_err()); // Wrong separator
 }
 
 // =============================================================================

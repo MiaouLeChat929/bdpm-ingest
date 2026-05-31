@@ -43,6 +43,15 @@ pub struct Composition {
     pub pharm_code: String,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DrugAtcCode {
+    pub atc_code: String,
+    pub detail_url: Option<String>,
+    pub parent_5_char: Option<String>,
+    pub parent_3_char: Option<String>,
+    pub parent_1_char: Option<String>,
+}
+
 pub enum ApiError {
     NotFound(String),
     Internal(String),
@@ -139,4 +148,65 @@ pub async fn drug_detail(
     }).await.map_err(|_| ApiError::Internal("Internal server error".to_string()))??;
 
     Ok(Json(detail))
+}
+
+/// GET /drugs/:cis/atc — Return all ATC codes for a drug via the mitm table.
+#[utoipa::path(
+    get,
+    path = "/drugs/{cis}/atc",
+    params(
+        ("cis" = String, Path, description = "Drug CIS code")
+    ),
+    responses(
+        (status = 200, description = "ATC codes for this drug", body = Vec<DrugAtcCode>),
+        (status = 404, description = "Drug not found")
+    ),
+    tag = "bdpm-ingest"
+)]
+pub async fn drug_atc_codes(
+    Path(cis): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<DrugAtcCode>>, ApiError> {
+    let cis = cis.trim().to_string();
+    let cis_for_error = cis.clone();
+    let db_path = state.db_path.clone();
+
+    let rows = tokio::task::spawn_blocking(move || -> Result<Vec<DrugAtcCode>, rusqlite::Error> {
+        let conn = crate::db::open_api_conn(&db_path)?;
+
+        // Verify drug exists
+        let exists: bool = conn.query_row(
+            "SELECT 1 FROM drugs WHERE cis = ?1",
+            [&cis],
+            |_| Ok(true),
+        ).unwrap_or(false);
+
+        if !exists {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT m.atc_code, m.detail_url, a.parent_5_char, a.parent_3_char, a.parent_1_char
+             FROM mitm m
+             LEFT JOIN atc_codes a ON m.atc_code = a.atc_code
+             WHERE m.cis = ?1
+             ORDER BY m.atc_code"
+        )?;
+
+        let rows = stmt.query_map([&cis], |row| Ok(DrugAtcCode {
+            atc_code: row.get(0)?,
+            detail_url: row.get(1)?,
+            parent_5_char: row.get(2)?,
+            parent_3_char: row.get(3)?,
+            parent_1_char: row.get(4)?,
+        }))?;
+
+        rows.collect()
+    }).await.map_err(|_| ApiError::Internal("Internal server error".to_string()))?
+      .map_err(|e| match e {
+          rusqlite::Error::QueryReturnedNoRows => ApiError::NotFound(format!("CIS {cis_for_error} not found")),
+          _ => ApiError::Internal("Internal server error".to_string()),
+      })?;
+
+    Ok(Json(rows))
 }
