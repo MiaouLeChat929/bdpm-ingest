@@ -613,15 +613,13 @@ pub(crate) fn insert_sql(file: BDPMFile) -> String {
 
 #[cfg(test)]
 mod atc_code_population_tests {
-    use super::*;
-
     /// Verifies the two-phase atc_code population pattern:
     /// 1. CIS_MITM fires first (drugs table empty at that point)
     /// 2. CIS_bdpm fires after drugs are populated, then runs the atc_code UPDATE + FTS5 sync
     /// This test simulates what the run_ingest loop does for the CIS_bdpm block.
     #[test]
     fn test_cis_bdpm_block_populates_atc_code_and_fts5() {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
 
         // Create minimal schema
         conn.execute_batch(
@@ -813,7 +811,7 @@ mod atc_code_population_tests {
     /// but atc_codes lookup table should still be populated.
     #[test]
     fn test_mitm_block_only_populates_atc_codes_lookup() {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE mitm (cis TEXT PRIMARY KEY, atc_code TEXT, detail_url TEXT);
              CREATE TABLE drugs (cis TEXT PRIMARY KEY, atc_code TEXT);"
