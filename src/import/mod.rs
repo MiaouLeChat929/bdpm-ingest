@@ -876,7 +876,7 @@ impl ImportReport {
 
 #[cfg(test)]
 mod insert_sql_tests {
-    use crate::import::quarantine_row;
+    use super::*;
     use crate::normalize::normalize_row;
 
     // Count params: iterate through SQL string, counting '?' placeholders.
@@ -1094,7 +1094,8 @@ mod insert_sql_tests {
 
 #[cfg(test)]
 mod compo_parallel_tests {
-    use crate::normalize::{dedup_compo, normalize_apostrophes, normalize_row};
+    use super::*;
+    use crate::normalize::{dedup_compo, normalize_row};
     use crate::parse::ValidatedRow;
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -1182,7 +1183,7 @@ mod compo_parallel_tests {
 
 #[cfg(test)]
 mod quarantine_tests {
-    use crate::import::quarantine_row;
+    use super::*;
 
     #[test]
     fn test_quarantine_row_insert() {
