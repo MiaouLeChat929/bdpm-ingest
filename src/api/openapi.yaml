@@ -1,4 +1,5 @@
-    Finished `release` profile [optimized] target(s) in 0.29s
+   Compiling bdpm-ingest v0.1.0 (/home/devadmin/Desktop/BDMP_DB)
+    Finished `release` profile [optimized] target(s) in 51.12s
      Running `/home/devadmin/.cargo/target/release/bdpm-ingest dump-open-api`
 openapi: 3.0.3
 info:
