@@ -1,5 +1,4 @@
-    Blocking waiting for file lock on artifact directory
-    Finished `release` profile [optimized] target(s) in 2m 04s
+    Finished `release` profile [optimized] target(s) in 0.29s
      Running `/home/devadmin/.cargo/target/release/bdpm-ingest dump-open-api`
 openapi: 3.0.3
 info:

@@ -131,35 +131,35 @@ fn normalize_reimb_rate(s: &str) -> Option<f32> {
 fn test_price_normalization_two_commas_thousands_separator() {
     // Critical case from BRIEF.md: "1,466,29" -> 146629 cents
     // Pattern: 2 commas -> thousands separator -> remove both, append decimal
-    assert_eq!(parse_price_cents("1,466,29").unwrap(), Some(146_629));
+    assert_eq!(parse_price_cents("1,466,29").unwrap_or_else(|e| panic!("{e}")), Some(146_629));
 }
 
 #[test]
 fn test_price_normalization_single_comma_decimal() {
-    assert_eq!(parse_price_cents("24,34").unwrap(), Some(2434));
-    assert_eq!(parse_price_cents("10,50").unwrap(), Some(1050));
-    assert_eq!(parse_price_cents("3,00").unwrap(), Some(300));
+    assert_eq!(parse_price_cents("24,34").unwrap_or_else(|e| panic!("{e}")), Some(2434));
+    assert_eq!(parse_price_cents("10,50").unwrap_or_else(|e| panic!("{e}")), Some(1050));
+    assert_eq!(parse_price_cents("3,00").unwrap_or_else(|e| panic!("{e}")), Some(300));
 }
 
 #[test]
 fn test_price_normalization_integer() {
-    assert_eq!(parse_price_cents("24").unwrap(), Some(2400));
-    assert_eq!(parse_price_cents("0").unwrap(), Some(0));
-    assert_eq!(parse_price_cents("999").unwrap(), Some(99_900));
+    assert_eq!(parse_price_cents("24").unwrap_or_else(|e| panic!("{e}")), Some(2400));
+    assert_eq!(parse_price_cents("0").unwrap_or_else(|e| panic!("{e}")), Some(0));
+    assert_eq!(parse_price_cents("999").unwrap_or_else(|e| panic!("{e}")), Some(99_900));
 }
 
 #[test]
 fn test_price_normalization_empty() {
-    assert_eq!(parse_price_cents("").unwrap(), None);
-    assert_eq!(parse_price_cents("   ").unwrap(), None);
+    assert_eq!(parse_price_cents("").unwrap_or_else(|e| panic!("{e}")), None);
+    assert_eq!(parse_price_cents("   ").unwrap_or_else(|e| panic!("{e}")), None);
 }
 
 #[test]
 fn test_price_normalization_large_thousands() {
     // 1,000,00 = 1000.00 euros -> 100000 cents
-    assert_eq!(parse_price_cents("1,000,00").unwrap(), Some(100_000));
+    assert_eq!(parse_price_cents("1,000,00").unwrap_or_else(|e| panic!("{e}")), Some(100_000));
     // 12,345,67 = 12345.67 euros -> 1234567 cents
-    assert_eq!(parse_price_cents("12,345,67").unwrap(), Some(1_234_567));
+    assert_eq!(parse_price_cents("12,345,67").unwrap_or_else(|e| panic!("{e}")), Some(1_234_567));
 }
 
 // =============================================================================
@@ -168,18 +168,18 @@ fn test_price_normalization_large_thousands() {
 
 #[test]
 fn test_date_parsing_yyyymmdd_to_iso() {
-    assert_eq!(parse_date_yyyymmdd("20260422").unwrap(), "2026-04-22");
-    assert_eq!(parse_date_yyyymmdd("19980103").unwrap(), "1998-01-03");
-    assert_eq!(parse_date_yyyymmdd("20250601").unwrap(), "2025-06-01");
-    assert_eq!(parse_date_yyyymmdd("20000101").unwrap(), "2000-01-01");
+    assert_eq!(parse_date_yyyymmdd("20260422").unwrap_or_else(|e| panic!("{e}")), "2026-04-22");
+    assert_eq!(parse_date_yyyymmdd("19980103").unwrap_or_else(|e| panic!("{e}")), "1998-01-03");
+    assert_eq!(parse_date_yyyymmdd("20250601").unwrap_or_else(|e| panic!("{e}")), "2025-06-01");
+    assert_eq!(parse_date_yyyymmdd("20000101").unwrap_or_else(|e| panic!("{e}")), "2000-01-01");
 }
 
 #[test]
 fn test_date_parsing_ddmmyyyy_to_iso() {
-    assert_eq!(parse_date_ddmm_yyyy("28/04/2026").unwrap(), "2026-04-28");
-    assert_eq!(parse_date_ddmm_yyyy("01/01/1998").unwrap(), "1998-01-01");
-    assert_eq!(parse_date_ddmm_yyyy("15/12/2025").unwrap(), "2025-12-15");
-    assert_eq!(parse_date_ddmm_yyyy("31/12/2000").unwrap(), "2000-12-31");
+    assert_eq!(parse_date_ddmm_yyyy("28/04/2026").unwrap_or_else(|e| panic!("{e}")), "2026-04-28");
+    assert_eq!(parse_date_ddmm_yyyy("01/01/1998").unwrap_or_else(|e| panic!("{e}")), "1998-01-01");
+    assert_eq!(parse_date_ddmm_yyyy("15/12/2025").unwrap_or_else(|e| panic!("{e}")), "2025-12-15");
+    assert_eq!(parse_date_ddmm_yyyy("31/12/2000").unwrap_or_else(|e| panic!("{e}")), "2000-12-31");
 }
 
 #[test]

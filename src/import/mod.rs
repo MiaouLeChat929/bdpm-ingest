@@ -19,7 +19,7 @@ pub const BDPM_URL: &str = "https://base-donnees-publique.medicaments.gouv.fr";
 
 /// Insert a rejected row into the quarantine table for audit and retry.
 /// Called when a row fails parsing, encoding, or field count validation.
-fn quarantine_row(
+pub(crate) fn quarantine_row(
     conn: &mut rusqlite::Connection,
     source_file: &str,
     source_line: usize,
@@ -877,6 +877,8 @@ impl ImportReport {
 #[cfg(test)]
 mod insert_sql_tests {
     use super::*;
+    use crate::normalize::normalize_row;
+    use crate::parse::ValidatedRow;
 
     // Count params: iterate through SQL string, counting '?' placeholders.
     // Handles numbered SQLite placeholders (?1, ?2, ?15) — the number after '?' is the
@@ -1094,7 +1096,9 @@ mod insert_sql_tests {
 #[cfg(test)]
 mod compo_parallel_tests {
     use super::*;
+    use crate::normalize::{dedup_compo, normalize_row};
     use crate::parse::ValidatedRow;
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
     /// Verifies parallel CIS_COMPO normalization produces identical output to sequential.
     /// Uses a known sample of 50 rows from raw CIS_COMPO data.
