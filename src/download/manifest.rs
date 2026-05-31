@@ -284,8 +284,9 @@ mod tests {
 
     #[test]
     fn cis_cip_trailing_tab_flag() {
-        assert!(CIS_CIP_BDPM.has_trailing_tab_fix);
-        // All others should be false
+        // Verify CIS_CIP_BDPM has trailing tab fix (verified in schema definition).
+        // All other files should not have it.
+        assert!(CIS_CIP_BDPM.has_trailing_tab_fix, "CIS_CIP_BDPM should have trailing tab fix");
         for f in BDPMFile::all() {
             if !matches!(f, BDPMFile::CIS_CIP_bdpm) {
                 assert!(!f.schema().has_trailing_tab_fix, "{}", f.filename());

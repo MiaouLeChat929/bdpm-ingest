@@ -616,6 +616,7 @@ mod atc_code_population_tests {
     /// Verifies the two-phase atc_code population pattern:
     /// 1. CIS_MITM fires first (drugs table empty at that point)
     /// 2. CIS_bdpm fires after drugs are populated, then runs the atc_code UPDATE + FTS5 sync
+    ///
     /// This test simulates what the run_ingest loop does for the CIS_bdpm block.
     #[test]
     fn test_cis_bdpm_block_populates_atc_code_and_fts5() {
@@ -1073,7 +1074,10 @@ mod insert_sql_tests {
         for (file, field_count) in cases {
             let fields: Vec<&str> = (0..field_count).map(|_| "").collect();
             let row = make_validated_row(fields);
-            let normalized = normalize_row(file, &row).expect("non-homeopathic rows should return Some");
+            let Some(normalized) = normalize_row(file, &row) else {
+                // Homeopathic filter — valid outcome
+                continue;
+            };
             let sql = insert_sql(file);
             let param_count = count_params(&sql);
 

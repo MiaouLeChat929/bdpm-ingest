@@ -14,7 +14,7 @@ fn test_cli_help() {
         .arg("--help")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("Failed to run bdpm-ingest --help");
+        .unwrap_or_else(|e| panic!("Failed to run bdpm-ingest --help: {e}"));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -40,7 +40,7 @@ fn test_cli_stats() {
         .args(["stats"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("Failed to run bdpm-ingest stats");
+        .unwrap_or_else(|e| panic!("Failed to run bdpm-ingest stats: {e}"));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -71,7 +71,7 @@ fn test_cli_logs() {
         .args(["logs", "--limit", "1"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("Failed to run bdpm-ingest logs");
+        .unwrap_or_else(|e| panic!("Failed to run bdpm-ingest logs: {e}"));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -93,7 +93,7 @@ fn test_cli_dump_openapi() {
         .args(["dump-open-api"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("Failed to run bdpm-ingest dump-open-api");
+        .unwrap_or_else(|e| panic!("Failed to run bdpm-ingest dump-open-api: {e}"));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -115,10 +115,7 @@ fn test_cli_stats_no_db() {
         .args(["stats", "--data-dir", "/tmp/nonexistent_dir_xyz"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("Failed to run bdpm-ingest stats with invalid data dir");
+        .unwrap_or_else(|e| panic!("Failed to run bdpm-ingest stats with invalid data dir: {e}"));
 
-    assert!(
-        !output.status.success(),
-        "Command should fail when DB does not exist"
-    );
+    assert!(!output.status.success(), "should fail when DB does not exist");
 }
