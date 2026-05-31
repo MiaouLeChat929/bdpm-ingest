@@ -7,8 +7,10 @@ pub mod availability;
 pub mod drugs;
 pub mod groups;
 pub mod openapi;
+pub mod prescription;
 pub mod safety;
 pub mod search;
+pub mod smr;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,6 +45,9 @@ pub fn build_app(db_path: PathBuf) -> Router {
         .route("/drugs/{cis}", get(drugs::drug_detail))
         .route("/drugs/{cis}/atc", get(drugs::drug_atc_codes))
         .route("/drugs/{cis}/safety", get(safety::drug_safety))
+        .route("/drugs/{cis}/prescription-rules", get(prescription::drug_prescription_rules))
+        .route("/drugs/{cis}/smr", get(smr::drug_smr))
+        .route("/drugs/{cis}/asmr", get(smr::drug_asmr))
         .route("/generic-groups", get(groups::list_generic_groups))
         .route("/generic-groups/{group_id}", get(groups::generic_group_detail))
         .route("/atc", get(atc::atc_top_level))

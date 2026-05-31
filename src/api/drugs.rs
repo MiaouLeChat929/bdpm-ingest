@@ -19,6 +19,7 @@ pub struct DrugDetail {
     pub lab_name: Option<String>,
     pub is_patent: bool,
     pub atc_code: Option<String>,
+    pub comm_status: Option<String>,
     pub presentations: Vec<Presentation>,
     pub compositions: Vec<Composition>,
 }
@@ -28,19 +29,31 @@ pub struct Presentation {
     pub cip: String,
     pub cip_raw: Option<String>,
     pub labels: Option<String>,
+    pub labels_clean: Option<String>,
     pub pres_status: Option<String>,
+    pub comm_status: Option<String>,
+    pub comm_date: Option<String>,
+    pub prix_ht_cents: Option<i64>,
     pub prix_ville_cents: Option<i64>,
     pub prix_rate_cents: Option<i64>,
     pub ean13: Option<String>,
     pub reimbursable: Option<String>,
-    pub reimb_rate: Option<f32>,
+    pub reimb_rate: Option<f64>,
+    pub is_orphan: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct Composition {
+    pub form_label: Option<String>,
+    pub substance_code: String,
     pub substance_name: String,
     pub dosage: Option<String>,
+    pub per_unit: Option<String>,
     pub pharm_code: String,
+    pub seq: i32,
+    pub substance_name_clean: Option<String>,
+    pub dosage_mg: Option<f64>,
+    pub is_orphan: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -92,7 +105,7 @@ pub async fn drug_detail(
         // Drug row
         let drug = conn.query_row(
             "SELECT cis, name, form, route, auth_status, procedure_type,
-                    auth_date, lab_name, is_patent, atc_code
+                    auth_date, lab_name, is_patent, atc_code, comm_status
              FROM drugs WHERE cis = ?1",
             [&cis],
             |row| Ok(DrugDetail {
@@ -106,6 +119,7 @@ pub async fn drug_detail(
                 lab_name: row.get(7)?,
                 is_patent: row.get::<_, i32>(8)? != 0,
                 atc_code: row.get(9)?,
+                comm_status: row.get(10)?,
                 presentations: Vec::new(),
                 compositions: Vec::new(),
             }),
@@ -116,31 +130,46 @@ pub async fn drug_detail(
 
         // Presentations
         let mut stmt = conn.prepare(
-            "SELECT cip, cip_raw, labels, pres_status, prix_ville_cents,
-                    prix_rate_cents, ean13, reimbursable, reimb_rate
+            "SELECT cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date,
+                   prix_ht_cents, prix_ville_cents, prix_rate_cents, ean13, reimbursable,
+                   reimb_rate, is_orphan
              FROM presentations WHERE cis = ?1"
         ).map_err(|_| ApiError::Internal("Internal server error".to_string()))?;
         let presentations = stmt.query_map([&cis], |row| Ok(Presentation {
             cip: row.get(0)?,
             cip_raw: row.get(1)?,
             labels: row.get(2)?,
-            pres_status: row.get(3)?,
-            prix_ville_cents: row.get(4)?,
-            prix_rate_cents: row.get(5)?,
-            ean13: row.get(6)?,
-            reimbursable: row.get(7)?,
-            reimb_rate: row.get(8)?,
+            labels_clean: row.get(3)?,
+            pres_status: row.get(4)?,
+            comm_status: row.get(5)?,
+            comm_date: row.get(6)?,
+            prix_ht_cents: row.get(7)?,
+            prix_ville_cents: row.get(8)?,
+            prix_rate_cents: row.get(9)?,
+            ean13: row.get(10)?,
+            reimbursable: row.get(11)?,
+            reimb_rate: row.get(12)?,
+            is_orphan: row.get::<_, i32>(13)? != 0,
         })).map_err(|_| ApiError::Internal("Internal server error".to_string()))?
           .filter_map(|r| r.ok()).collect();
 
         // Compositions
         let mut stmt = conn.prepare(
-            "SELECT substance_name, dosage, pharm_code FROM compositions WHERE cis = ?1"
+            "SELECT form_label, substance_code, substance_name, dosage, per_unit, pharm_code,
+                   seq, substance_name_clean, dosage_mg, is_orphan
+             FROM compositions WHERE cis = ?1"
         ).map_err(|_| ApiError::Internal("Internal server error".to_string()))?;
         let compositions = stmt.query_map([&cis], |row| Ok(Composition {
-            substance_name: row.get(0)?,
-            dosage: row.get(1)?,
-            pharm_code: row.get::<_, String>(2).unwrap_or_default(),
+            form_label: row.get(0)?,
+            substance_code: row.get(1)?,
+            substance_name: row.get(2)?,
+            dosage: row.get(3)?,
+            per_unit: row.get(4)?,
+            pharm_code: row.get(5)?,
+            seq: row.get(6)?,
+            substance_name_clean: row.get(7)?,
+            dosage_mg: row.get(8)?,
+            is_orphan: row.get::<_, i32>(9)? != 0,
         })).map_err(|_| ApiError::Internal("Internal server error".to_string()))?
           .filter_map(|r| r.ok()).collect();
 

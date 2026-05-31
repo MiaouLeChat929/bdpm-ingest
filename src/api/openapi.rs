@@ -14,6 +14,9 @@ use utoipa::OpenApi;
         super::availability::availability,
         super::health,
         super::safety::drug_safety,
+        super::prescription::drug_prescription_rules,
+        super::smr::drug_smr,
+        super::smr::drug_asmr,
     ),
     components(schemas(
         super::search::DrugSearchResult,
@@ -27,6 +30,9 @@ use utoipa::OpenApi;
         super::availability::AvailabilityRow,
         super::safety::SafetyResponse,
         super::safety::SafetyAlert,
+        super::prescription::PrescriptionRules,
+        super::smr::SmrEntry,
+        super::smr::AsmrEntry,
         super::HealthResponse,
     )),
     tags(

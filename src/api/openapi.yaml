@@ -1,3 +1,5 @@
+    Finished `release` profile [optimized] target(s) in 0.18s
+     Running `/home/devadmin/.cargo/target/release/bdpm-ingest dump-open-api`
 openapi: 3.0.3
 info:
   title: bdpm-ingest
@@ -176,6 +178,76 @@ paths:
                 $ref: '#/components/schemas/DrugDetail'
         '404':
           description: Drug not found
+  /drugs/{cis}/asmr:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /drugs/{cis}/asmr
+      description: |-
+        Returns ASMR decisions for a drug from the `asmr` table.
+
+        - **404** if CIS does not exist in the database
+        - **200** with empty list if no ASMR data exists
+      operationId: drug_asmr
+      parameters:
+      - name: cis
+        in: path
+        description: CIS drug identifier
+        required: true
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: Sort field (level, decision_date)
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: order
+        in: query
+        description: Sort order (asc, desc)
+        required: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: ASMR decisions found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AsmrEntry'
+        '404':
+          description: CIS not found in database
+  /drugs/{cis}/prescription-rules:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /drugs/{cis}/prescription-rules
+      description: |-
+        Returns prescription classification flags for a drug from the `prescription_flags` table.
+
+        - **404** if CIS does not exist in the database
+        - **200** with prescription flags if found
+      operationId: drug_prescription_rules
+      parameters:
+      - name: cis
+        in: path
+        description: CIS drug code
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Prescription rules for drug
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrescriptionRules'
+        '404':
+          description: Drug not found
   /drugs/{cis}/safety:
     get:
       tags:
@@ -204,6 +276,49 @@ paths:
                 $ref: '#/components/schemas/SafetyResponse'
         '404':
           description: CIS not found in database
+  /drugs/{cis}/smr:
+    get:
+      tags:
+      - bdpm-ingest
+      summary: GET /drugs/{cis}/smr
+      description: |-
+        Returns SMR decisions for a drug from the `smr` table.
+
+        - **404** if CIS does not exist in the database
+        - **200** with empty list if no SMR data exists
+      operationId: drug_smr
+      parameters:
+      - name: cis
+        in: path
+        description: CIS drug identifier
+        required: true
+        schema:
+          type: string
+      - name: sort
+        in: query
+        description: Sort field (level, decision_date)
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: order
+        in: query
+        description: Sort order (asc, desc)
+        required: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: SMR decisions found
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SmrEntry'
+        '404':
+          description: CIS not found in database
   /generic-groups:
     get:
       tags:
@@ -228,6 +343,13 @@ paths:
       - name: order
         in: query
         description: 'Sort order: asc, desc'
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: include_orphans
+        in: query
+        description: Include orphan groups (true/false, default false)
         required: false
         schema:
           type: string
@@ -300,6 +422,29 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
 components:
   schemas:
+    AsmrEntry:
+      type: object
+      description: A single ASMR (Amelioration du Service Medical Rendu) entry.
+      required:
+      - ct_id
+      - is_orphan
+      properties:
+        avis:
+          type: string
+          nullable: true
+        ct_id:
+          type: string
+        decision_date:
+          type: string
+          nullable: true
+        decision_type:
+          type: string
+          nullable: true
+        is_orphan:
+          type: boolean
+        level:
+          type: string
+          nullable: true
     AtcCode:
       type: object
       required:
@@ -340,6 +485,9 @@ components:
           nullable: true
         cis:
           type: string
+        date_end:
+          type: string
+          nullable: true
         date_remise:
           type: string
           nullable: true
@@ -347,6 +495,9 @@ components:
           type: string
           nullable: true
         name:
+          type: string
+          nullable: true
+        source_url:
           type: string
           nullable: true
         status:
@@ -358,16 +509,39 @@ components:
     Composition:
       type: object
       required:
+      - substance_code
       - substance_name
       - pharm_code
+      - seq
+      - is_orphan
       properties:
         dosage:
           type: string
           nullable: true
+        dosage_mg:
+          type: number
+          format: double
+          nullable: true
+        form_label:
+          type: string
+          nullable: true
+        is_orphan:
+          type: boolean
+        per_unit:
+          type: string
+          nullable: true
         pharm_code:
+          type: string
+        seq:
+          type: integer
+          format: int32
+        substance_code:
           type: string
         substance_name:
           type: string
+        substance_name_clean:
+          type: string
+          nullable: true
     DrugDetail:
       type: object
       required:
@@ -388,6 +562,9 @@ components:
           nullable: true
         cis:
           type: string
+        comm_status:
+          type: string
+          nullable: true
         compositions:
           type: array
           items:
@@ -469,24 +646,66 @@ components:
       properties:
         status:
           type: string
+    PrescriptionRules:
+      type: object
+      description: Prescription rules response.
+      required:
+      - cis
+      - liste_i
+      - liste_ii
+      - stupefiant
+      - hospitalier
+      - dentaire
+      - reserve_hopital
+      properties:
+        cis:
+          type: string
+        dentaire:
+          type: boolean
+        hospitalier:
+          type: boolean
+        liste_i:
+          type: boolean
+        liste_ii:
+          type: boolean
+        reserve_hopital:
+          type: boolean
+        stupefiant:
+          type: boolean
     Presentation:
       type: object
       required:
       - cip
+      - is_orphan
       properties:
         cip:
           type: string
         cip_raw:
           type: string
           nullable: true
+        comm_date:
+          type: string
+          nullable: true
+        comm_status:
+          type: string
+          nullable: true
         ean13:
           type: string
           nullable: true
+        is_orphan:
+          type: boolean
         labels:
+          type: string
+          nullable: true
+        labels_clean:
           type: string
           nullable: true
         pres_status:
           type: string
+          nullable: true
+        prix_ht_cents:
+          type: integer
+          format: int64
           nullable: true
         prix_rate_cents:
           type: integer
@@ -498,7 +717,7 @@ components:
           nullable: true
         reimb_rate:
           type: number
-          format: float
+          format: double
           nullable: true
         reimbursable:
           type: string
@@ -536,6 +755,29 @@ components:
           type: string
         data_available:
           type: boolean
+    SmrEntry:
+      type: object
+      description: A single SMR (Service Medical Rendu) entry.
+      required:
+      - ct_id
+      - is_orphan
+      properties:
+        avis:
+          type: string
+          nullable: true
+        ct_id:
+          type: string
+        decision_date:
+          type: string
+          nullable: true
+        decision_type:
+          type: string
+          nullable: true
+        is_orphan:
+          type: boolean
+        level:
+          type: string
+          nullable: true
 tags:
 - name: bdpm-ingest
   description: BDPM Drug Database API

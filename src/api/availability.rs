@@ -26,7 +26,9 @@ pub struct AvailabilityRow {
     pub status_type: i32,
     pub status: Option<String>,
     pub date_start: Option<String>,
+    pub date_end: Option<String>,
     pub date_remise: Option<String>,
+    pub source_url: Option<String>,
 }
 
 pub enum AvailabilityError {
@@ -78,7 +80,7 @@ pub async fn availability(
         let has_cis = params.cis.is_some();
         let has_status = params.status.is_some();
 
-        let base_select = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_remise
+        let base_select = "SELECT a.cis, d.name, a.cip, a.status_type, a.status, a.date_start, a.date_end, a.date_remise, a.source_url
                           FROM availability a INNER JOIN drugs d ON a.cis = d.cis";
 
         let rows = if has_cis {
@@ -93,7 +95,9 @@ pub async fn availability(
                 status_type: row.get(3)?,
                 status: row.get(4)?,
                 date_start: row.get(5)?,
-                date_remise: row.get(6)?,
+                date_end: row.get(6)?,
+                date_remise: row.get(7)?,
+                source_url: row.get(8)?,
             }))?.collect::<Result<Vec<_>, _>>()?;
             rows
         } else if has_status {
@@ -108,7 +112,9 @@ pub async fn availability(
                 status_type: row.get(3)?,
                 status: row.get(4)?,
                 date_start: row.get(5)?,
-                date_remise: row.get(6)?,
+                date_end: row.get(6)?,
+                date_remise: row.get(7)?,
+                source_url: row.get(8)?,
             }))?.collect::<Result<Vec<_>, _>>()?;
             rows
         } else {
@@ -121,7 +127,9 @@ pub async fn availability(
                 status_type: row.get(3)?,
                 status: row.get(4)?,
                 date_start: row.get(5)?,
-                date_remise: row.get(6)?,
+                date_end: row.get(6)?,
+                date_remise: row.get(7)?,
+                source_url: row.get(8)?,
             }))?.collect::<Result<Vec<_>, _>>()?;
             rows
         };
