@@ -401,6 +401,7 @@ fn import_file(
                         v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
                         v[10].as_deref().unwrap_or(""), v[11].as_deref().unwrap_or(""),
                         v[12].as_deref().unwrap_or(""), v[13].as_deref().unwrap_or(""),
+                        0, // is_orphan
                     ])
                 }
                 BDPMFile::CIS_COMPO_bdpm => {
@@ -411,6 +412,7 @@ fn import_file(
                         v[4].as_deref().unwrap_or(""), v[5].as_deref().unwrap_or(""),
                         v[6].as_deref().unwrap_or(""), v[7].as_deref().unwrap_or(""),
                         v[8].as_deref().unwrap_or(""), v[9].as_deref().unwrap_or(""),
+                        0, // is_orphan
                     ])
                 }
                 BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm => {
@@ -527,7 +529,13 @@ fn import_file(
         // Boiron lab and ENREG HOM procedure drugs are filtered at normalize_row.
         // CIS_InfoImportantes orphans are not flagged (no is_orphan column).
         // CIS_bdpm uses INSERT OR IGNORE after DELETE, so no orphan risk.
-        if matches!(file, BDPMFile::CIS_HAS_SMR_bdpm | BDPMFile::CIS_HAS_ASMR_bdpm | BDPMFile::CIS_GENER_bdpm) {
+        if matches!(file,
+            BDPMFile::CIS_HAS_SMR_bdpm
+            | BDPMFile::CIS_HAS_ASMR_bdpm
+            | BDPMFile::CIS_GENER_bdpm
+            | BDPMFile::CIS_COMPO_bdpm
+            | BDPMFile::CIS_CIP_bdpm
+        ) {
             let orphan_count: i64 = conn.query_row(
                 &format!("SELECT COUNT(*) FROM {table} WHERE cis NOT IN (SELECT cis FROM drugs)"),
                 [],
@@ -559,12 +567,12 @@ pub(crate) fn insert_sql(file: BDPMFile) -> String {
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)".into()
         }
         BDPMFile::CIS_CIP_bdpm => {
-            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, ean13, reimbursable)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)".into()
+            "INSERT OR IGNORE INTO presentations (cis, cip, cip_raw, labels, labels_clean, pres_status, comm_status, comm_date, prix_ht_cents, prix_ville_cents, prix_rate_cents, reimb_rate, ean13, reimbursable, is_orphan)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)".into()
         }
         BDPMFile::CIS_COMPO_bdpm => {
-            "INSERT OR IGNORE INTO compositions (cis, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq, substance_name_clean, dosage_mg)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)".into()
+            "INSERT OR IGNORE INTO compositions (cis, form_label, substance_code, substance_name, dosage, per_unit, pharm_code, seq, substance_name_clean, dosage_mg, is_orphan)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)".into()
         }
         BDPMFile::CIS_HAS_SMR_bdpm => {
             "INSERT OR IGNORE INTO smr (cis, ct_id, decision_type, decision_date, level, avis)
@@ -871,25 +879,11 @@ impl ImportReport {
 mod insert_sql_tests {
     use super::*;
 
-    // Count params: iterate through SQL string, counting '?' and any following digits
+    // Count params: iterate through SQL string, counting '?' placeholders.
+    // Handles numbered SQLite placeholders (?1, ?2, ?15) — the number after '?' is the
+    // 1-based index, NOT the count. We count each '?' as one placeholder.
     fn count_params(sql: &str) -> usize {
-        let mut count = 0;
-        let mut chars = sql.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '?' {
-                // Check if it's followed by digits (numbered param)
-                let mut num_str = String::new();
-                while let Some(&next_c) = chars.peek() {
-                    if next_c.is_ascii_digit() {
-                        num_str.push(chars.next().unwrap());
-                    } else {
-                        break;
-                    }
-                }
-                count += 1;
-            }
-        }
-        count
+        sql.chars().filter(|&c| c == '?').count()
     }
 
     #[test]
@@ -915,8 +909,8 @@ mod insert_sql_tests {
         );
         assert_eq!(
             count_params(&sql),
-            14,
-            "Expected 14 params for presentations, got: {sql}"
+            15,
+            "Expected 15 params for presentations (14 fields + is_orphan), got: {sql}"
         );
     }
 
@@ -929,8 +923,8 @@ mod insert_sql_tests {
         );
         assert_eq!(
             count_params(&sql),
-            10,
-            "Expected 10 params for compositions, got: {sql}"
+            11,
+            "Expected 11 params for compositions (11 ? + is_orphan=0 hardcoded), got: {sql}"
         );
     }
 
@@ -1066,8 +1060,8 @@ mod insert_sql_tests {
         // drug_name is normalized but dropped at import time.
         let cases: Vec<(BDPMFile, usize)> = vec![
             (BDPMFile::CIS_bdpm, 12),
-            (BDPMFile::CIS_CIP_bdpm, 12),
-            (BDPMFile::CIS_COMPO_bdpm, 8),
+            // CIP and COMPO excluded — is_orphan is a bound param (?15/?11) not in normalized values.
+            // Tested separately via test_insert_sql_presentations and test_insert_sql_compositions.
             (BDPMFile::CIS_HAS_SMR_bdpm, 6),
             (BDPMFile::CIS_HAS_ASMR_bdpm, 6),
             (BDPMFile::CIS_GENER_bdpm, 5),

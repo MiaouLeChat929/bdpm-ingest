@@ -47,11 +47,13 @@ CREATE TABLE IF NOT EXISTS presentations (
     prix_ht_cents      INTEGER,
     prix_ville_cents   INTEGER,
     prix_rate_cents   INTEGER,
-    labels_clean      TEXT
+    labels_clean      TEXT,
+    is_orphan          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_presentations_cis ON presentations(cis);
 CREATE INDEX IF NOT EXISTS idx_presentations_ean13 ON presentations(ean13);
+CREATE INDEX IF NOT EXISTS idx_presentations_orphan ON presentations(is_orphan);
 
 -- =============================================================================
 -- TABLE: compositions
@@ -67,6 +69,7 @@ CREATE TABLE IF NOT EXISTS compositions (
     seq                INTEGER NOT NULL,
     dosage_mg          REAL,
     substance_name_clean TEXT,
+    is_orphan          INTEGER NOT NULL DEFAULT 0,
 
     PRIMARY KEY (cis, substance_code, seq)
 );
@@ -75,6 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_compo_cis ON compositions(cis);
 CREATE INDEX IF NOT EXISTS idx_compo_substance ON compositions(substance_code);
 CREATE INDEX IF NOT EXISTS idx_compo_dosage ON compositions(dosage_mg);
 CREATE INDEX IF NOT EXISTS idx_compo_substance_clean ON compositions(substance_name_clean);
+CREATE INDEX IF NOT EXISTS idx_compo_orphan ON compositions(is_orphan);
 
 -- =============================================================================
 -- TABLE: generic_groups
